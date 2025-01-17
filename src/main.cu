@@ -3,6 +3,40 @@
 
 #include <stdio.h>
 
+static void printDeviceInfo(void)
+{
+	int			deviceCount;
+	cudaError_t error = cudaGetDeviceCount(&deviceCount);
+	if (error != cudaSuccess)
+	{
+		printf("CUDA Error: Failed to get device count: %s\n", cudaGetErrorString(error));
+		return;
+	}
+
+	printf("CUDA Devices Found: %d\n\n", deviceCount);
+
+	for (int i = 0; i < deviceCount; i++)
+	{
+		cudaDeviceProp props;
+		error = cudaGetDeviceProperties(&props, i);
+		if (error != cudaSuccess)
+		{
+			printf("CUDA Error: Failed to get device properties: %s\n", cudaGetErrorString(error));
+			continue;
+		}
+
+		printf("Device %d: %s\n", i, props.name);
+		printf("  Compute Capability: %d.%d\n", props.major, props.minor);
+		printf("  Total Global Memory: %.2f GB\n", props.totalGlobalMem / (1024.0 * 1024.0 * 1024.0));
+		printf("  Max Threads per Block: %d\n", props.maxThreadsPerBlock);
+		printf("  Max Block Dimensions: %dx%dx%d\n", props.maxThreadsDim[0], props.maxThreadsDim[1], props.maxThreadsDim[2]);
+		printf("  Max Grid Dimensions: %dx%dx%d\n", props.maxGridSize[0], props.maxGridSize[1], props.maxGridSize[2]);
+		printf("  Memory Clock Rate: %.0f MHz\n", props.memoryClockRate * 1e-3f);
+		printf("  Memory Bus Width: %d bits\n", props.memoryBusWidth);
+		printf("  L2 Cache Size: %d bytes\n\n", props.l2CacheSize);
+	}
+}
+
 int main(int argc, char** argv)
 {
 	if (argc != 2)
@@ -11,6 +45,8 @@ int main(int argc, char** argv)
 		printf("Example: %s models/Llama3.2-1B-Instruct\n", argv[0]);
 		return 1;
 	}
+
+	printDeviceInfo();
 
 	lyModel* pModel;
 	if (!lyLoadModel(&pModel, argv[1], true, true))

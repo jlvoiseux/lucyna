@@ -154,7 +154,7 @@ bool lyRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount)
 		totalSize *= pTensor->shape[i];
 	}
 
-	if (!lySetTensorData(pTensor, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), totalSize * sizeof(nv_bfloat16), LY_MEMORY_CPU))
+	if (!lySetTensorData(pTensor, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), totalSize * sizeof(nv_bfloat16), LY_MEMORY_GPU))
 	{
 		lyDestroyTensor(pTensor);
 		return false;

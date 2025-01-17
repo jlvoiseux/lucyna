@@ -90,7 +90,6 @@ bool lySetTensorData(lyTensor* pTensor, const nv_bfloat16* pData, size_t dataSiz
 		return false;
 	}
 
-	// Free existing data if any
 	if (pTensor->data)
 	{
 		if (pTensor->memoryType == LY_MEMORY_GPU)
