@@ -1,0 +1,15 @@
+cmake-build-debug-visual-studio/*
+dataset/*
+model/*
+model-tuned/*
+unify/*
+venv/*
+.clang-format
+.clang-tidy
+.idea/*
+.git/*
+dataset.txt
+model.bin
+tokenizer.bin
+bin/*
+README.md
