@@ -1,5 +1,5 @@
 #include "lyModelLoader.h"
-#include "lyPickle.h"
+#include "lyTokenizerLoader.h"
 
 #include <stdio.h>
 
@@ -56,6 +56,15 @@ int main(int argc, char** argv)
 
 		printf("  %-40s shape: %-20s size: %zu bytes\n", tensor->name, shapeStr, tensor->dataSize);
 	}
+
+	lyTokenizer* pTokenizer;
+	if (!lyLoadTokenizer(&pTokenizer, argv[1]))
+	{
+		printf("Failed to load tokenizer from directory: %s\n", argv[1]);
+		lyDestroyModel(pModel);
+		return 1;
+	}
+	printf("\nTokenizer loaded with %d tokens\n", pTokenizer->tokenCount);
 
 	lyDestroyModel(pModel);
 	printf("\nModel freed successfully!\n");
