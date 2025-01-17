@@ -19,13 +19,20 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	printf("\nModel loaded successfully!\n");
 	printf("Model configuration:\n");
 	printf("  Dimension: %d\n", pModel->args.dim);
 	printf("  Layers: %d\n", pModel->args.nLayers);
 	printf("  Attention heads: %d\n", pModel->args.nHeads);
 	printf("  KV heads: %d\n", pModel->args.nKVHeads);
 	printf("  Vocabulary size: %d\n", pModel->args.vocabSize);
+	printf("  Multiple of: %d\n", pModel->args.multipleOf);
+	printf("  FFN dim multiplier: %.1f\n", pModel->args.ffnDimMultiplier);
+	printf("  Norm epsilon: %.1e\n", pModel->args.normEps);
+	printf("  Use scaled rope: %s\n", pModel->args.useScaledRope ? "true" : "false");
+	printf("  Rope theta: %.1f\n", pModel->args.ropeTheta);
+	printf("  Max sequence length: %d\n", pModel->args.maxSequenceLength);
+	printf("  N rep: %d\n", pModel->args.nRep);
+	printf("  Head dimension: %d\n", pModel->args.headDim);
 
 	printf("\nTensors loaded: %d\n", pModel->tensorCount);
 	for (size_t i = 0; i < pModel->tensorCount; i++)

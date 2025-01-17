@@ -108,6 +108,81 @@ void lyUnmapModelFile(lyMappedFile* pMapping)
 #endif
 }
 
+bool lyLoadModelArgs(lyModel* pModel, const char* modelDir)
+{
+	if (!pModel || !modelDir)
+	{
+		return false;
+	}
+
+	char configPath[1024];
+#ifdef _WIN32
+	if (sprintf_s(configPath, sizeof(configPath), "%s\\params.json", modelDir) < 0)
+#else
+	if (snprintf(configPath, sizeof(configPath), "%s/params.json", modelDir) < 0)
+#endif
+	{
+		return false;
+	}
+
+	FILE* configFile = fopen(configPath, "r");
+	if (!configFile)
+	{
+		return false;
+	}
+
+	char line[1024];
+	while (fgets(line, sizeof(line), configFile))
+	{
+		char* ptr = strchr(line, ':');
+		if (!ptr)
+		{
+			continue;
+		}
+
+		*ptr = '\0';
+		ptr++;
+
+		char* key = line;
+		while (*key == ' ' || *key == '\t' || *key == '"')
+			key++;
+		char* end = key + strlen(key) - 1;
+		while (end > key && (*end == ' ' || *end == '\t' || *end == '"' || *end == '\n' || *end == '\r'))
+			*end-- = '\0';
+
+		char* value = ptr;
+		while (*value == ' ' || *value == '\t' || *value == '"')
+			value++;
+		end = value + strlen(value) - 1;
+		while (end > value && (*end == ' ' || *end == '\t' || *end == '"' || *end == '\n' || *end == '\r' || *end == ','))
+			*end-- = '\0';
+
+		if (strcmp(key, "dim") == 0)
+			pModel->args.dim = atoi(value);
+		else if (strcmp(key, "n_layers") == 0)
+			pModel->args.nLayers = atoi(value);
+		else if (strcmp(key, "n_heads") == 0)
+			pModel->args.nHeads = atoi(value);
+		else if (strcmp(key, "n_kv_heads") == 0)
+			pModel->args.nKVHeads = atoi(value);
+		else if (strcmp(key, "vocab_size") == 0)
+			pModel->args.vocabSize = atoi(value);
+		else if (strcmp(key, "multiple_of") == 0)
+			pModel->args.multipleOf = atoi(value);
+		else if (strcmp(key, "ffn_dim_multiplier") == 0)
+			pModel->args.ffnDimMultiplier = (float)atof(value);
+		else if (strcmp(key, "norm_eps") == 0)
+			pModel->args.normEps = (float)atof(value);
+		else if (strcmp(key, "rope_theta") == 0)
+			pModel->args.ropeTheta = (float)atof(value);
+		else if (strcmp(key, "use_scaled_rope") == 0)
+			pModel->args.useScaledRope = (strcmp(value, "true") == 0);
+	}
+
+	fclose(configFile);
+	return true;
+}
+
 bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, bool includeVocab)
 {
 	if (!ppModel || !modelDir)
@@ -133,6 +208,12 @@ bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, b
 	{
 		*ppModel = pModel;
 		return true;
+	}
+
+	if (!lyLoadModelArgs(pModel, modelDir))
+	{
+		lyDestroyModel(pModel);
+		return false;
 	}
 
 	char modelPath[1024];
