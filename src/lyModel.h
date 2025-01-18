@@ -45,3 +45,4 @@ typedef struct lyModel
 } lyModel;
 
 bool lyCreateDefaultModelArgs(lyModelArgs* pArgs);
+bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* name);

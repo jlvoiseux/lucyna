@@ -26,3 +26,22 @@ bool lyCreateDefaultModelArgs(lyModelArgs* pArgs)
 
 	return true;
 }
+
+bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* name)
+{
+	if (!ppTensor || !pModel || !name)
+	{
+		return false;
+	}
+
+	for (int32_t i = 0; i < pModel->tensorCount; i++)
+	{
+		if (strcmp(pModel->tensors[i].name, name) == 0)
+		{
+			*ppTensor = &pModel->tensors[i];
+			return true;
+		}
+	}
+
+	return false;
+}
