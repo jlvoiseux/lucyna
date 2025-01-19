@@ -24,7 +24,7 @@ bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
 
 	lyTensor* pEmbeddings;
 	int32_t	  embeddingsShape[] = {pTransformer->vocabSize, pTransformer->dim};
-	if (!lyGetModelTensor(&pEmbeddings, pModel, "tok_embeddings.weight") || !lySetTensorShape(pEmbeddings, embeddingsShape, 2))
+	if (!lyGetModelTensor(&pEmbeddings, pModel, "tok_embeddings.weight") || !lySetTensorShape(pEmbeddings, embeddingsShape, 2) || !lySetTensorData(pEmbeddings, NULL, pTransformer->vocabSize * pTransformer->dim * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTransformer(pTransformer);
 		return false;
@@ -132,23 +132,7 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, cons
 			lyDestroyTensor(h);
 			return false;
 		}
-		if (!lySetTensorShape(mask, shape, 2))
-		{
-			lyDestroyTensor(mask);
-			lyDestroyTensor(freqsCis);
-			lyDestroyTensor(h);
-			return false;
-		}
-
-		if (!lyTensorToGPU(mask))
-		{
-			lyDestroyTensor(mask);
-			lyDestroyTensor(freqsCis);
-			lyDestroyTensor(h);
-			return false;
-		}
-
-		if (!lyTensorMakeTriangularMask(mask))
+		if (!lySetTensorShape(mask, shape, 2) || !lySetTensorData(mask, NULL, seqLen * seqLen * sizeof(nv_bfloat16)) || !lyTensorMakeTriangularMask(mask))
 		{
 			lyDestroyTensor(mask);
 			lyDestroyTensor(freqsCis);
@@ -157,19 +141,24 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, cons
 		}
 	}
 
+	lyTensor* currentTensor = h;
 	for (int32_t i = 0; i < pTransformer->nLayers; i++)
 	{
 		lyTensor* blockOut;
-		if (!lyTransformerBlockForward(&blockOut, pTransformer->blocks[i], h, startPos, freqsCis, mask))
+		if (!lyTransformerBlockForward(&blockOut, pTransformer->blocks[i], currentTensor, startPos, freqsCis, mask))
 		{
 			if (mask)
 				lyDestroyTensor(mask);
 			lyDestroyTensor(freqsCis);
-			lyDestroyTensor(h);
+			lyDestroyTensor(currentTensor);
 			return false;
 		}
-		lyDestroyTensor(h);
-		h = blockOut;
+
+		if (currentTensor != h)
+		{
+			lyDestroyTensor(currentTensor);
+		}
+		currentTensor = blockOut;
 	}
 
 	if (mask)
@@ -177,12 +166,12 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, cons
 	lyDestroyTensor(freqsCis);
 
 	lyTensor* normalized;
-	if (!lyRMSNormForward(&normalized, pTransformer->norm, h))
+	if (!lyRMSNormForward(&normalized, pTransformer->norm, currentTensor))
 	{
-		lyDestroyTensor(h);
+		lyDestroyTensor(currentTensor);
 		return false;
 	}
-	lyDestroyTensor(h);
+	lyDestroyTensor(currentTensor);
 
 	if (!lyTensorMatMul(ppOutput, normalized, pTransformer->output))
 	{

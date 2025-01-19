@@ -107,7 +107,6 @@ bool lyLoadTokenizer(lyTokenizer** ppTokenizer, const char* modelDir)
 		return false;
 	}
 
-	// Read base tokens
 	char	line[1024];
 	int		tokenIdx = 0;
 	uint8_t decodedData[1024];
@@ -188,6 +187,8 @@ bool lyLoadTokenizer(lyTokenizer** ppTokenizer, const char* modelDir)
 		}
 	}
 
+	printf("\nTokenizer loaded with %d tokens\n", pTokenizer->tokenCount);
+	
 	*ppTokenizer = pTokenizer;
 	return true;
 }

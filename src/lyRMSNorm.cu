@@ -73,24 +73,15 @@ bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, const lyTenso
 		return false;
 	}
 
-	if (!lySetTensorShape(pOutput, pInput->shape, pInput->rank))
+	int seqLen		  = pInput->shape[0];
+	int dim			  = pInput->shape[1];
+	int totalElements = seqLen * dim;
+
+	if (!lySetTensorShape(pOutput, pInput->shape, pInput->rank) || !lySetTensorData(pOutput, NULL, totalElements * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(pOutput);
 		return false;
 	}
-
-	if (pOutput->memoryType != LY_MEMORY_GPU)
-	{
-		if (!lyTensorToGPU(pOutput))
-		{
-			lyDestroyTensor(pOutput);
-			return false;
-		}
-	}
-
-	int seqLen		  = pInput->shape[0];
-	int dim			  = pInput->shape[1];
-	int totalElements = seqLen * dim;
 
 	int blockSize = 256;
 	int numBlocks = (totalElements + blockSize - 1) / blockSize;

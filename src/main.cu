@@ -72,24 +72,24 @@ int main(int argc, char** argv)
 
 	printf("Model loaded successfully.\n\n");
 
-	char prompt[2048];
-	while (getInput(prompt))
-	{
-		if (strlen(prompt) == 0)
-		{
-			break;
-		}
-
-		char formattedPrompt[4096];
-		snprintf(formattedPrompt,
-				 sizeof(formattedPrompt),
-				 "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n%s<|eot_id|>"
-				 "<|start_header_id|>assistant<|end_header_id|>\n\n",
-				 prompt);
-
-		// TODO: Call inference functions here when implemented
-		printf("Model would process: %s\n", formattedPrompt);
-	}
+	//	char prompt[2048];
+	//	while (getInput(prompt))
+	//	{
+	//		if (strlen(prompt) == 0)
+	//		{
+	//			break;
+	//		}
+	//
+	//		char formattedPrompt[4096];
+	//		snprintf(formattedPrompt,
+	//				 sizeof(formattedPrompt),
+	//				 "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n%s<|eot_id|>"
+	//				 "<|start_header_id|>assistant<|end_header_id|>\n\n",
+	//				 prompt);
+	//
+	//		// TODO: Call inference functions here when implemented
+	//		printf("Model would process: %s\n", formattedPrompt);
+	//	}
 
 	lyDestroyModel(pModel);
 	printf("\nModel freed successfully!\n");

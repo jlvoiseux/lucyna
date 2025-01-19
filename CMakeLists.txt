@@ -10,14 +10,19 @@ enable_language(CUDA)
 find_package(CUDAToolkit REQUIRED)
 
 file(GLOB BASE_SOURCES "src/ly*.cu")
-file(GLOB TEST_SOURCES "test/ly*.cu")
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/test)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
 
-# Main executable
-add_executable(lucyna ${BASE_SOURCES} "src/main.cu")
+add_library(lucyna_lib STATIC ${BASE_SOURCES})
+set_target_properties(lucyna_lib PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_SOURCE_PROPERTY_FORMAT C
+)
+
+add_executable(lucyna "src/main.cu")
+target_link_libraries(lucyna lucyna_lib)
 
 set_target_properties(lucyna PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
@@ -41,34 +46,43 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(unity)
 
-add_executable(lucyna_test ${BASE_SOURCES} ${TEST_SOURCES})
+function(configure_test_target TARGET_NAME)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cu
+            "extern \"C\" __global__ void dummy_kernel() {}")
+    target_sources(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cu)
 
-# Add a dummy kernel to ensure proper CUDA linking
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cu
-        "extern \"C\" __global__ void dummy_kernel() {}")
-target_sources(lucyna_test PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cu)
+    target_link_libraries(${TARGET_NAME} lucyna_lib)
 
-set_target_properties(lucyna_test PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_SOURCE_PROPERTY_FORMAT C
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
-)
-
-set_target_properties(lucyna_test PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_SOURCE_PROPERTY_FORMAT C
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/bin"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/bin"
-)
-
-target_include_directories(lucyna_test PRIVATE ${unity_SOURCE_DIR}/src)
-target_sources(lucyna_test PRIVATE
-        ${unity_SOURCE_DIR}/src/unity.c
-)
-
-if (MSVC)
-    set_target_properties(lucyna_test PROPERTIES
-            LINK_FLAGS "/NODEFAULTLIB:LIBCMT"
+    set_target_properties(${TARGET_NAME} PROPERTIES
+            CUDA_SEPARABLE_COMPILATION ON
+            CUDA_SOURCE_PROPERTY_FORMAT C
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/bin"
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/bin"
     )
-endif ()
+
+    target_include_directories(${TARGET_NAME} PRIVATE ${unity_SOURCE_DIR}/src)
+    target_sources(${TARGET_NAME} PRIVATE ${unity_SOURCE_DIR}/src/unity.c)
+
+    if (MSVC)
+        set_target_properties(${TARGET_NAME} PROPERTIES
+                LINK_FLAGS "/NODEFAULTLIB:LIBCMT"
+        )
+    endif ()
+endfunction()
+
+add_executable(lucyna_test_tokenizer "test/lyTokenizerTest.cu")
+add_executable(lucyna_test_transformer "test/lyTransformerTest.cu")
+add_executable(lucyna_test_tensor "test/lyTensorTest.cu")
+add_executable(lucyna_test_tensor_math "test/lyTensorMathTest.cu")
+
+set(TEST_EXECUTABLES
+        lucyna_test_tokenizer
+        lucyna_test_transformer
+        lucyna_test_tensor
+        lucyna_test_tensor_math
+)
+
+foreach (TEST_EXECUTABLE ${TEST_EXECUTABLES})
+    configure_test_target(${TEST_EXECUTABLE})
+endforeach ()

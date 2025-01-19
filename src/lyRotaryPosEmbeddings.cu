@@ -1,34 +1,60 @@
 #include "lyRotaryPosEmbeddings.h"
 #include "lyTensorMath.h"
 
+#include <stdio.h>
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
 
-static float llamaScaleFn(float freq)
+static bool applyScaling(lyTensor* pFreqs)
 {
+	if (!pFreqs)
+	{
+		return false;
+	}
+
 	const float scaleFactor		= 8.0f;
 	const float lowFreqFactor	= 1.0f;
 	const float highFreqFactor	= 4.0f;
-	const float oldContextLen	= 8192.0f;
+	const float oldContextLen	= 8192.0f;	// original llama3 length
 	const float lowFreqWavelen	= oldContextLen / lowFreqFactor;
 	const float highFreqWavelen = oldContextLen / highFreqFactor;
 
-	float wavelen = 2.0f * M_PI / freq;
+	int size = pFreqs->shape[0];
 
-	if (wavelen < highFreqWavelen)
+	for (int i = 0; i < size; i++)
 	{
-		return freq;
+		float freq;
+		if (!lyTensorGetItemAsFloat32(&freq, pFreqs, i))
+		{
+			return false;
+		}
+
+		float wavelen = 2.0f * M_PI / freq;
+		float newFreq;
+
+		if (wavelen < highFreqWavelen)
+		{
+			newFreq = freq;
+		}
+		else if (wavelen > lowFreqWavelen)
+		{
+			newFreq = freq / scaleFactor;
+		}
+		else
+		{
+			float smooth = (oldContextLen / wavelen - lowFreqFactor) / (highFreqFactor - lowFreqFactor);
+			newFreq		 = (1.0f - smooth) * freq / scaleFactor + smooth * freq;
+		}
+
+		if (!lyTensorSetItemFromFloat32(pFreqs, i, newFreq))
+		{
+			return false;
+		}
 	}
-	else if (wavelen > lowFreqWavelen)
-	{
-		return freq / scaleFactor;
-	}
-	else
-	{
-		float smooth = (oldContextLen / wavelen - lowFreqFactor) / (highFreqFactor - lowFreqFactor);
-		return (1.0f - smooth) * freq / scaleFactor + smooth * freq;
-	}
+
+	return true;
 }
 
 __global__ void applyRotaryEmbeddingKernel(nv_bfloat16* xqOut, nv_bfloat16* xkOut, const nv_bfloat16* xq, const nv_bfloat16* xk, const nv_bfloat16* freqsCosReal, const nv_bfloat16* freqsSinReal, int batchSize, int headDim)
@@ -76,7 +102,7 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 	{
 		return false;
 	}
-	if (!lySetTensorShape(freqs, freqsShape, 1))
+	if (!lySetTensorShape(freqs, freqsShape, 1) || !lySetTensorData(freqs, NULL, (dim / 2) * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(freqs);
 		return false;
@@ -93,14 +119,16 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 		}
 	}
 
-	lyTensor* scaledFreqs;
-	if (!lyTensorScale(&scaledFreqs, freqs, llamaScaleFn))
+	if (!applyScaling(freqs))
 	{
 		lyDestroyTensor(freqs);
 		return false;
 	}
-	lyDestroyTensor(freqs);
-	freqs = scaledFreqs;
+	for (int i = 0; i < dim / 2; i++)
+	{
+		float val;
+		lyTensorGetItemAsFloat32(&val, freqs, i);
+	}
 
 	lyTensor* t;
 	int32_t	  tShape[] = {end};
@@ -109,7 +137,7 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 		lyDestroyTensor(freqs);
 		return false;
 	}
-	if (!lySetTensorShape(t, tShape, 1))
+	if (!lySetTensorShape(t, tShape, 1) || !lySetTensorData(t, NULL, end * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(t);
 		lyDestroyTensor(freqs);
@@ -127,14 +155,22 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 	}
 
 	lyTensor* freqsOuter;
-	if (!lyTensorMatMul(&freqsOuter, t, freqs))
+	if (!lyTensorOuter(&freqsOuter, t, freqs))
 	{
 		lyDestroyTensor(t);
 		lyDestroyTensor(freqs);
 		return false;
 	}
 
-	// Convert to complex numbers using sin/cos
+	for (int i = 0; i < 5; i++)
+	{
+		for (int j = 0; j < 5; j++)
+		{
+			float val;
+			lyTensorGetItemAsFloat32(&val, freqsOuter, i * dim / 2 + j);
+		}
+	}
+
 	int32_t	  outShape[] = {end, dim / 2};
 	lyTensor* out;
 	if (!lyCreateTensor(&out))
@@ -144,7 +180,7 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 		lyDestroyTensor(freqs);
 		return false;
 	}
-	if (!lySetTensorShape(out, outShape, 2))
+	if (!lySetTensorShape(out, outShape, 2) || !lySetTensorData(out, NULL, end * dim * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(out);
 		lyDestroyTensor(freqsOuter);
@@ -153,7 +189,6 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 		return false;
 	}
 
-	// Fill complex tensor with sin/cos values
 	for (int i = 0; i < end; i++)
 	{
 		for (int j = 0; j < dim / 2; j++)
@@ -168,7 +203,10 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 				return false;
 			}
 
-			if (!lyTensorSetComplexItem(out, i, j, cosf(angle), sinf(angle)))
+			float cos_val = cosf(angle);
+			float sin_val = sinf(angle);
+
+			if (!lyTensorSetComplexItem(out, i, j, cos_val, sin_val))
 			{
 				lyDestroyTensor(out);
 				lyDestroyTensor(freqsOuter);
@@ -177,6 +215,8 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 				return false;
 			}
 		}
+
+		cudaDeviceSynchronize();
 	}
 
 	lyDestroyTensor(freqsOuter);
@@ -199,18 +239,20 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTens
 	{
 		return false;
 	}
-	if (!lySetTensorShape(pXQOut, pXQ->shape, pXQ->rank) || !lySetTensorShape(pXKOut, pXK->shape, pXK->rank))
+
+	int batchSize	  = pXQ->shape[0];
+	int headDim		  = pXQ->shape[1];
+	int totalElements = batchSize * headDim / 2;
+
+	if (!lySetTensorShape(pXQOut, pXQ->shape, pXQ->rank) || !lySetTensorData(pXQOut, NULL, totalElements * sizeof(nv_bfloat16)) || !lySetTensorShape(pXKOut, pXK->shape, pXK->rank) || !lySetTensorData(pXKOut, NULL, totalElements * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(pXQOut);
 		lyDestroyTensor(pXKOut);
 		return false;
 	}
 
-	int batchSize	  = pXQ->shape[0];
-	int headDim		  = pXQ->shape[1];
-	int totalElements = batchSize * headDim / 2;
-	int blockSize	  = 256;
-	int gridSize	  = (totalElements + blockSize - 1) / blockSize;
+	int blockSize = 256;
+	int gridSize  = (totalElements + blockSize - 1) / blockSize;
 
 	applyRotaryEmbeddingKernel<<<gridSize, blockSize>>>(pXQOut->data,
 														pXKOut->data,

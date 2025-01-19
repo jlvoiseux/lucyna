@@ -141,20 +141,13 @@ bool lyRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount)
 	}
 	free(shape);
 
-	void* strideArrayPtr;
-	if (!lyGetPtrValue(args[3], &strideArrayPtr))
-	{
-		lyDestroyTensor(pTensor);
-		return false;
-	}
-
 	size_t totalSize = 1;
 	for (int32_t i = 0; i < pTensor->rank; i++)
 	{
 		totalSize *= pTensor->shape[i];
 	}
 
-	if (!lySetTensorData(pTensor, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), totalSize * sizeof(nv_bfloat16), LY_MEMORY_GPU))
+	if (!lySetTensorData(pTensor, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), totalSize * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(pTensor);
 		return false;
