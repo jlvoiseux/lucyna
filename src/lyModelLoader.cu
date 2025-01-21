@@ -179,6 +179,8 @@ bool lyLoadModelArgs(lyModel* pModel, const char* modelDir)
 			pModel->args.useScaledRope = (strcmp(value, "true") == 0);
 	}
 
+	pModel->args.headDim = pModel->args.dim / pModel->args.nHeads;
+
 	fclose(configFile);
 	return true;
 }

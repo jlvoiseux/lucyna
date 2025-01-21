@@ -34,3 +34,5 @@ bool lyTensorGetItemAsFloat32(float* pOut, const lyTensor* pTensor, int32_t inde
 bool lyTensorSetItemFromFloat32(lyTensor* pTensor, int32_t index, float value);
 bool lyTensorGetComplexItem(float* pReal, float* pImag, const lyTensor* pTensor, int32_t row, int32_t col);
 bool lyTensorSetComplexItem(lyTensor* pTensor, int32_t row, int32_t col, float real, float imag);
+
+void lyTensorPrint(const lyTensor* pTensor);

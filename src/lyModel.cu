@@ -22,7 +22,7 @@ bool lyCreateDefaultModelArgs(lyModelArgs* pArgs)
 	pArgs->useScaledRope	 = false;
 	pArgs->maxSequenceLength = 2048;
 	pArgs->nRep				 = 0;
-	pArgs->headDim			 = 0;
+	pArgs->headDim			 = pArgs->dim / pArgs->nHeads;
 
 	return true;
 }

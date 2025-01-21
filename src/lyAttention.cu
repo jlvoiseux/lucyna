@@ -6,37 +6,54 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static bool lyUpdateKVCache(lyAttention* pAttention, const lyTensor* pK, const lyTensor* pV, int32_t startPos)
+__global__ void updateKVCacheKernel(nv_bfloat16* cacheK, nv_bfloat16* cacheV, const nv_bfloat16* k, const nv_bfloat16* v, int32_t startPos, int32_t seqLen, int32_t nKVHeads, int32_t headDim, int32_t maxSeqLen)
+{
+	int idx			  = blockIdx.x * blockDim.x + threadIdx.x;
+	int totalElements = seqLen * nKVHeads * headDim;
+
+	if (idx >= totalElements)
+	{
+		return;
+	}
+
+	int seqIdx	  = idx / (nKVHeads * headDim);
+	int remainder = idx % (nKVHeads * headDim);
+
+	int destPos = startPos + seqIdx;
+	if (destPos >= maxSeqLen)
+	{
+		return;
+	}
+
+	cacheK[destPos * nKVHeads * headDim + remainder] = k[idx];
+	cacheV[destPos * nKVHeads * headDim + remainder] = v[idx];
+}
+
+bool lyUpdateKVCache(lyAttention* pAttention, const lyTensor* pK, const lyTensor* pV, int32_t startPos)
 {
 	if (!pAttention || !pK || !pV || startPos < 0)
 	{
 		return false;
 	}
 
-	int32_t seqLen = pK->shape[0];
+	int32_t seqLen	  = pK->shape[0];
+	int32_t maxSeqLen = pAttention->cacheK->shape[0];
 
-	int32_t destOffset = startPos;
-	for (int32_t i = 0; i < seqLen; i++)
+	if (startPos + seqLen > maxSeqLen)
 	{
-		if (destOffset + i >= pAttention->cacheK->shape[0])
-		{
-			return false;
-		}
+		return false;
+	}
 
-		size_t		copySize = pAttention->nKVHeads * pAttention->headDim * sizeof(nv_bfloat16);
-		cudaError_t error	 = cudaMemcpy(pAttention->cacheK->data + (destOffset + i) * pAttention->nKVHeads * pAttention->headDim, pK->data + i * pAttention->nKVHeads * pAttention->headDim, copySize, cudaMemcpyDeviceToDevice);
+	int32_t totalElements = seqLen * pAttention->nKVHeads * pAttention->headDim;
+	int32_t blockSize	  = 256;
+	int32_t numBlocks	  = (totalElements + blockSize - 1) / blockSize;
 
-		if (error != cudaSuccess)
-		{
-			return false;
-		}
+	updateKVCacheKernel<<<numBlocks, blockSize>>>(pAttention->cacheK->data, pAttention->cacheV->data, pK->data, pV->data, startPos, seqLen, pAttention->nKVHeads, pAttention->headDim, maxSeqLen);
 
-		error = cudaMemcpy(pAttention->cacheV->data + (destOffset + i) * pAttention->nKVHeads * pAttention->headDim, pV->data + i * pAttention->nKVHeads * pAttention->headDim, copySize, cudaMemcpyDeviceToDevice);
-
-		if (error != cudaSuccess)
-		{
-			return false;
-		}
+	cudaError_t error = cudaGetLastError();
+	if (error != cudaSuccess)
+	{
+		return false;
 	}
 
 	return true;
@@ -66,29 +83,59 @@ bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t
 	int32_t normalHeadsTotalDim = pModel->args.nHeads * pModel->args.headDim;
 	int32_t kvHeadsTotalDim		= pModel->args.nKVHeads * pModel->args.headDim;
 
+	int32_t perm[] = {1, 0};
+
+	// Get and transpose WQ
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wq.weight", layerIndex);
-	if (!lyGetModelTensor(&pAttention->attnWQ, pModel, tensorName))
+	lyTensor* tempWQ;
+	if (!lyGetModelTensor(&tempWQ, pModel, tensorName))
+	{
+		free(pAttention);
+		return false;
+	}
+	if (!lyTensorTranspose(&pAttention->attnWQ, tempWQ, perm))
 	{
 		free(pAttention);
 		return false;
 	}
 
+	// Get and transpose WK
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wk.weight", layerIndex);
-	if (!lyGetModelTensor(&pAttention->attnWK, pModel, tensorName))
+	lyTensor* tempWK;
+	if (!lyGetModelTensor(&tempWK, pModel, tensorName))
+	{
+		lyDestroyAttention(pAttention);
+		return false;
+	}
+	if (!lyTensorTranspose(&pAttention->attnWK, tempWK, perm))
 	{
 		lyDestroyAttention(pAttention);
 		return false;
 	}
 
+	// Get and transpose WV
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wv.weight", layerIndex);
-	if (!lyGetModelTensor(&pAttention->attnWV, pModel, tensorName))
+	lyTensor* tempWV;
+	if (!lyGetModelTensor(&tempWV, pModel, tensorName))
+	{
+		lyDestroyAttention(pAttention);
+		return false;
+	}
+	if (!lyTensorTranspose(&pAttention->attnWV, tempWV, perm))
 	{
 		lyDestroyAttention(pAttention);
 		return false;
 	}
 
+	// Get and transpose WO
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wo.weight", layerIndex);
-	if (!lyGetModelTensor(&pAttention->attnWO, pModel, tensorName))
+	lyTensor* tempWO;
+	if (!lyGetModelTensor(&tempWO, pModel, tensorName))
+	{
+		lyDestroyAttention(pAttention);
+		return false;
+	}
+	if (!lyTensorTranspose(&pAttention->attnWO, tempWO, perm))
 	{
 		lyDestroyAttention(pAttention);
 		return false;
@@ -192,8 +239,9 @@ bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTe
 		return false;
 	}
 
-	lyTensor* scores;
-	if (!lyTensorMatMul(&scores, rotatedQ, rotatedK))
+	lyTensor* transposedK;
+	int32_t	  permK[] = {1, 2};
+	if (!lyTensorTranspose(&transposedK, rotatedK, permK))
 	{
 		lyDestroyTensor(rotatedQ);
 		lyDestroyTensor(rotatedK);
@@ -201,12 +249,24 @@ bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTe
 		return false;
 	}
 
+	lyTensor* scores;
+	if (!lyTensorMatMul(&scores, rotatedQ, transposedK))
+	{
+		lyDestroyTensor(transposedK);
+		lyDestroyTensor(rotatedQ);
+		lyDestroyTensor(rotatedK);
+		lyDestroyTensor(xv);
+		return false;
+	}
+
+	lyDestroyTensor(transposedK);
+	lyDestroyTensor(rotatedQ);
+	lyDestroyTensor(rotatedK);
+
 	float scaleFactor = 1.0f / sqrt(pAttention->headDim);
 	if (!lyTensorScaleAndAdd(&scores, scores, pMask, scaleFactor))
 	{
 		lyDestroyTensor(scores);
-		lyDestroyTensor(rotatedQ);
-		lyDestroyTensor(rotatedK);
 		lyDestroyTensor(xv);
 		return false;
 	}
@@ -215,8 +275,15 @@ bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTe
 	if (!lyTensorMatMul(&attnOut, scores, xv))
 	{
 		lyDestroyTensor(scores);
-		lyDestroyTensor(rotatedQ);
-		lyDestroyTensor(rotatedK);
+		lyDestroyTensor(xv);
+		return false;
+	}
+
+	int32_t flatShape[] = {seqLen, pAttention->nHeads * pAttention->headDim};
+	if (!lyReshapeTensor(attnOut, flatShape, 2))
+	{
+		lyDestroyTensor(attnOut);
+		lyDestroyTensor(scores);
 		lyDestroyTensor(xv);
 		return false;
 	}
@@ -225,16 +292,12 @@ bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTe
 	{
 		lyDestroyTensor(attnOut);
 		lyDestroyTensor(scores);
-		lyDestroyTensor(rotatedQ);
-		lyDestroyTensor(rotatedK);
 		lyDestroyTensor(xv);
 		return false;
 	}
 
 	lyDestroyTensor(attnOut);
 	lyDestroyTensor(scores);
-	lyDestroyTensor(rotatedQ);
-	lyDestroyTensor(rotatedK);
 	lyDestroyTensor(xv);
 
 	return true;

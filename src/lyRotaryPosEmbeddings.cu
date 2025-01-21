@@ -7,54 +7,58 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-static bool applyScaling(lyTensor* pFreqs)
+__global__ void computeFrequenciesKernel(nv_bfloat16* output, int32_t dim, int32_t end, float theta)
 {
-	if (!pFreqs)
-	{
-		return false;
-	}
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx >= dim / 2)
+		return;
+
+	float dimFloat = (float)dim;
+	float val	   = 1.0f / powf(theta, (2.0f * idx) / dimFloat);
+
+	// Apply scaling inline
+	float wavelen = 2.0f * M_PI / val;
+	float newVal;
 
 	const float scaleFactor		= 8.0f;
 	const float lowFreqFactor	= 1.0f;
 	const float highFreqFactor	= 4.0f;
-	const float oldContextLen	= 8192.0f;	// original llama3 length
+	const float oldContextLen	= 8192.0f;
 	const float lowFreqWavelen	= oldContextLen / lowFreqFactor;
 	const float highFreqWavelen = oldContextLen / highFreqFactor;
 
-	int size = pFreqs->shape[0];
-
-	for (int i = 0; i < size; i++)
+	if (wavelen < highFreqWavelen)
 	{
-		float freq;
-		if (!lyTensorGetItemAsFloat32(&freq, pFreqs, i))
-		{
-			return false;
-		}
-
-		float wavelen = 2.0f * M_PI / freq;
-		float newFreq;
-
-		if (wavelen < highFreqWavelen)
-		{
-			newFreq = freq;
-		}
-		else if (wavelen > lowFreqWavelen)
-		{
-			newFreq = freq / scaleFactor;
-		}
-		else
-		{
-			float smooth = (oldContextLen / wavelen - lowFreqFactor) / (highFreqFactor - lowFreqFactor);
-			newFreq		 = (1.0f - smooth) * freq / scaleFactor + smooth * freq;
-		}
-
-		if (!lyTensorSetItemFromFloat32(pFreqs, i, newFreq))
-		{
-			return false;
-		}
+		newVal = val;
+	}
+	else if (wavelen > lowFreqWavelen)
+	{
+		newVal = val / scaleFactor;
+	}
+	else
+	{
+		float smooth = (oldContextLen / wavelen - lowFreqFactor) / (highFreqFactor - lowFreqFactor);
+		newVal		 = (1.0f - smooth) * val / scaleFactor + smooth * val;
 	}
 
-	return true;
+	output[idx] = __float2bfloat16(newVal);
+}
+
+__global__ void computeRotaryKernel(nv_bfloat16* output, const nv_bfloat16* freqs, int32_t dim, int32_t end)
+{
+	int row = blockIdx.y;
+	int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (row >= end || col >= dim / 2)
+		return;
+
+	float freq	= __bfloat162float(freqs[col]);
+	float angle = row * freq;
+
+	// Each complex number takes 2 slots - real part at even indices, imaginary at odd indices
+	int baseIdx			= row * dim + 2 * col;	// Note: dim not dim/2 here because we need 2 slots per complex number
+	output[baseIdx]		= __float2bfloat16(cosf(angle));
+	output[baseIdx + 1] = __float2bfloat16(sinf(angle));
 }
 
 __global__ void applyRotaryEmbeddingKernel(nv_bfloat16* xqOut, nv_bfloat16* xkOut, const nv_bfloat16* xq, const nv_bfloat16* xk, const nv_bfloat16* freqsCosReal, const nv_bfloat16* freqsSinReal, int batchSize, int headDim)
@@ -92,137 +96,55 @@ __global__ void applyRotaryEmbeddingKernel(nv_bfloat16* xqOut, nv_bfloat16* xkOu
 bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 {
 	if (!ppOut || dim <= 0 || end <= 0 || theta <= 0)
-	{
 		return false;
-	}
 
+	// Create frequencies tensor
 	lyTensor* freqs;
-	int32_t	  freqsShape[] = {dim / 2};
 	if (!lyCreateTensor(&freqs))
-	{
 		return false;
-	}
+
+	int32_t freqsShape[] = {dim / 2};
 	if (!lySetTensorShape(freqs, freqsShape, 1) || !lySetTensorData(freqs, NULL, (dim / 2) * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(freqs);
 		return false;
 	}
 
-	float dimFloat = (float)dim;
-	for (int i = 0; i < dim / 2; i++)
-	{
-		float val = (float)(1.0 / pow(theta, (2.0f * i) / dimFloat));
-		if (!lyTensorSetItemFromFloat32(freqs, i, val))
-		{
-			lyDestroyTensor(freqs);
-			return false;
-		}
-	}
+	// Compute frequencies
+	int freqsBlockSize = 256;
+	int freqsGridSize  = (dim / 2 + freqsBlockSize - 1) / freqsBlockSize;
+	computeFrequenciesKernel<<<freqsGridSize, freqsBlockSize>>>(freqs->data, dim, end, theta);
 
-	if (!applyScaling(freqs))
-	{
-		lyDestroyTensor(freqs);
-		return false;
-	}
-	for (int i = 0; i < dim / 2; i++)
-	{
-		float val;
-		lyTensorGetItemAsFloat32(&val, freqs, i);
-	}
-
-	lyTensor* t;
-	int32_t	  tShape[] = {end};
-	if (!lyCreateTensor(&t))
-	{
-		lyDestroyTensor(freqs);
-		return false;
-	}
-	if (!lySetTensorShape(t, tShape, 1) || !lySetTensorData(t, NULL, end * sizeof(nv_bfloat16)))
-	{
-		lyDestroyTensor(t);
-		lyDestroyTensor(freqs);
-		return false;
-	}
-
-	for (int i = 0; i < end; i++)
-	{
-		if (!lyTensorSetItemFromFloat32(t, i, (float)i))
-		{
-			lyDestroyTensor(t);
-			lyDestroyTensor(freqs);
-			return false;
-		}
-	}
-
-	lyTensor* freqsOuter;
-	if (!lyTensorOuter(&freqsOuter, t, freqs))
-	{
-		lyDestroyTensor(t);
-		lyDestroyTensor(freqs);
-		return false;
-	}
-
-	for (int i = 0; i < 5; i++)
-	{
-		for (int j = 0; j < 5; j++)
-		{
-			float val;
-			lyTensorGetItemAsFloat32(&val, freqsOuter, i * dim / 2 + j);
-		}
-	}
-
-	int32_t	  outShape[] = {end, dim / 2};
+	// Create output tensor
 	lyTensor* out;
 	if (!lyCreateTensor(&out))
 	{
-		lyDestroyTensor(freqsOuter);
-		lyDestroyTensor(t);
 		lyDestroyTensor(freqs);
 		return false;
 	}
+
+	int32_t outShape[] = {end, dim / 2};
 	if (!lySetTensorShape(out, outShape, 2) || !lySetTensorData(out, NULL, end * dim * sizeof(nv_bfloat16)))
+	{  // Note: dim not dim/2 here
+		lyDestroyTensor(out);
+		lyDestroyTensor(freqs);
+		return false;
+	}
+
+	// Compute rotary embeddings
+	dim3 blockSize(256);
+	dim3 gridSize((dim / 2 + blockSize.x - 1) / blockSize.x, end);
+	computeRotaryKernel<<<gridSize, blockSize>>>(out->data, freqs->data, dim, end);
+
+	cudaError_t error = cudaGetLastError();
+	if (error != cudaSuccess)
 	{
 		lyDestroyTensor(out);
-		lyDestroyTensor(freqsOuter);
-		lyDestroyTensor(t);
 		lyDestroyTensor(freqs);
 		return false;
 	}
 
-	for (int i = 0; i < end; i++)
-	{
-		for (int j = 0; j < dim / 2; j++)
-		{
-			float angle;
-			if (!lyTensorGetItemAsFloat32(&angle, freqsOuter, i * dim / 2 + j))
-			{
-				lyDestroyTensor(out);
-				lyDestroyTensor(freqsOuter);
-				lyDestroyTensor(t);
-				lyDestroyTensor(freqs);
-				return false;
-			}
-
-			float cos_val = cosf(angle);
-			float sin_val = sinf(angle);
-
-			if (!lyTensorSetComplexItem(out, i, j, cos_val, sin_val))
-			{
-				lyDestroyTensor(out);
-				lyDestroyTensor(freqsOuter);
-				lyDestroyTensor(t);
-				lyDestroyTensor(freqs);
-				return false;
-			}
-		}
-
-		cudaDeviceSynchronize();
-	}
-
-	lyDestroyTensor(freqsOuter);
-	lyDestroyTensor(t);
 	lyDestroyTensor(freqs);
-
 	*ppOut = out;
 	return true;
 }
@@ -242,8 +164,10 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTens
 
 	int batchSize	  = pXQ->shape[0];
 	int headDim		  = pXQ->shape[1];
-	int totalElements = batchSize * headDim / 2;
+	int elementPairs  = batchSize * headDim / 2;  // For complex number handling
+	int totalElements = batchSize * headDim;	  // Actual total elements
 
+	// Allocate full size but process as pairs
 	if (!lySetTensorShape(pXQOut, pXQ->shape, pXQ->rank) || !lySetTensorData(pXQOut, NULL, totalElements * sizeof(nv_bfloat16)) || !lySetTensorShape(pXKOut, pXK->shape, pXK->rank) || !lySetTensorData(pXKOut, NULL, totalElements * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(pXQOut);
@@ -252,7 +176,7 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTens
 	}
 
 	int blockSize = 256;
-	int gridSize  = (totalElements + blockSize - 1) / blockSize;
+	int gridSize  = (elementPairs + blockSize - 1) / blockSize;	 // Grid size based on pairs
 
 	applyRotaryEmbeddingKernel<<<gridSize, blockSize>>>(pXQOut->data,
 														pXKOut->data,

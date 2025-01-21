@@ -109,7 +109,7 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, cons
 	}
 
 	lyTensor* h;
-	if (!lyTensorMatMul(&h, pTokens, pTransformer->tokEmbeddings))
+	if (!lyTensorEmbedding(&h, pTokens, pTransformer->tokEmbeddings))
 	{
 		return false;
 	}

@@ -75,12 +75,14 @@ add_executable(lucyna_test_tokenizer "test/lyTokenizerTest.cu")
 add_executable(lucyna_test_transformer "test/lyTransformerTest.cu")
 add_executable(lucyna_test_tensor "test/lyTensorTest.cu")
 add_executable(lucyna_test_tensor_math "test/lyTensorMathTest.cu")
+add_executable(lucyna_test_attention "test/lyAttentionTest.cu")
 
 set(TEST_EXECUTABLES
         lucyna_test_tokenizer
         lucyna_test_transformer
         lucyna_test_tensor
         lucyna_test_tensor_math
+        lucyna_test_attention
 )
 
 foreach (TEST_EXECUTABLE ${TEST_EXECUTABLES})

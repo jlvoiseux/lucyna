@@ -1,6 +1,7 @@
 #include "lyModelLoader.h"
 #include "lyRotaryPosEmbeddings.h"
 #include "lyTensor.h"
+#include "lyTensorMath.h"
 #include "lyTransformer.h"
 #include "unity.h"
 
@@ -22,38 +23,100 @@ void tearDown(void)
 	}
 }
 
+bool logCallback(const char* format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vprintf(format, args);
+	va_end(args);
+	return true;
+}
+
+static bool verifyPrepare(const lyTensor* pInputTensor, const lyTensor* pFreqsCis, const lyTensor* pMask)
+{
+	// Verify input tensor shape
+	TEST_ASSERT_EQUAL_INT32(2, pInputTensor->rank);
+	TEST_ASSERT_EQUAL_INT32(15, pInputTensor->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(4096, pInputTensor->shape[1]);
+
+	// Verify freqsCis shape
+	TEST_ASSERT_EQUAL_INT32(2, pFreqsCis->rank);
+	TEST_ASSERT_EQUAL_INT32(15, pFreqsCis->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(64, pFreqsCis->shape[1]);
+
+	// Verify mask shape
+	TEST_ASSERT_EQUAL_INT32(2, pMask->rank);
+	TEST_ASSERT_EQUAL_INT32(15, pMask->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(15, pMask->shape[1]);
+
+	return true;
+}
+
+static bool verifyOutput(const lyTensor* pOutput)
+{
+	TEST_ASSERT_EQUAL_INT32(2, pOutput->rank);
+	TEST_ASSERT_EQUAL_INT32(1, pOutput->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(128256, pOutput->shape[1]);
+
+	return true;
+}
+
 void test_TransformerForward(void)
 {
-	lyTransformer* pTransformer;
-	lyCreateTransformer(&pTransformer, pModel);
+	if (!pModel)
+	{
+		TEST_IGNORE_MESSAGE("Model not found, skipping test");
+		return;
+	}
 
-	int32_t	  tokenShape[] = {4};
+	const int32_t SEQ_LENGTH = 20;
+
+	int32_t	  shape[] = {SEQ_LENGTH};
 	lyTensor* pTokens;
 	TEST_ASSERT_TRUE(lyCreateTensor(&pTokens));
-	TEST_ASSERT_TRUE(lySetTensorShape(pTokens, tokenShape, 1));
-	TEST_ASSERT_TRUE(lySetTensorData(pTokens, NULL, 4 * sizeof(nv_bfloat16)));
+	TEST_ASSERT_TRUE(lySetTensorShape(pTokens, shape, 1));
+	TEST_ASSERT_TRUE(lySetTensorData(pTokens, NULL, SEQ_LENGTH * sizeof(nv_bfloat16)));
 
-	int32_t testTokens[] = {1, 2, 3, 4};
-	for (int i = 0; i < 4; i++)
+	const int32_t padToken = -1;  // Get from model
+	for (int32_t i = 0; i < SEQ_LENGTH; i++)
 	{
-		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &i, testTokens[i]));
+		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &i, padToken));
 	}
 
-	lyTensor* pOutput;
-	TEST_ASSERT_TRUE(lyTransformerForward(&pOutput, pTransformer, pTokens, 0));
+	const int32_t promptTokens[] = {128000, 128006, 882, 128007, 271, 3923, 374, 701, 836, 30, 128009, 128006, 78191, 128007, 271};
+	const int32_t promptLength	 = sizeof(promptTokens) / sizeof(promptTokens[0]);
 
-	TEST_ASSERT_EQUAL_INT32(2, pOutput->rank);
-	TEST_ASSERT_EQUAL_INT32(4, pOutput->shape[0]);
-	TEST_ASSERT_EQUAL_INT32(pTransformer->vocabSize, pOutput->shape[1]);
+	for (int32_t i = 0; i < promptLength; i++)
+	{
+		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &i, promptTokens[i]));
+	}
 
-	lyDestroyTensor(pOutput);
+	lyTransformer* pTransformer;
+	TEST_ASSERT_TRUE(lyCreateTransformer(&pTransformer, pModel));
+
+	int32_t	  prevPos = 0;
+	lyTensor *pInputTokens, *pLogits, *pNextToken;
+
+	for (int32_t curPos = promptLength; curPos < SEQ_LENGTH; curPos++)
+	{
+		TEST_ASSERT_TRUE(lyTensorSlice(&pInputTokens, pTokens, prevPos, curPos));
+		TEST_ASSERT_TRUE(lyTransformerForward(&pLogits, pTransformer, pInputTokens, prevPos));
+		TEST_ASSERT_TRUE(lyTensorSlice(&pNextToken, pLogits, pLogits->shape[0] - 1, pLogits->shape[0]));
+		lyTensor* pArgmax;
+		TEST_ASSERT_TRUE(lyTensorArgmax(&pArgmax, pNextToken, pNextToken->rank - 1));
+		int32_t nextTokenId;
+		TEST_ASSERT_TRUE(lyTensorGetItem(&nextTokenId, pArgmax, 0));
+		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &curPos, nextTokenId));
+		lyDestroyTensor(pInputTokens);
+		lyDestroyTensor(pLogits);
+		lyDestroyTensor(pNextToken);
+		lyDestroyTensor(pArgmax);
+
+		prevPos = curPos;
+	}
+
+	lyDestroyTransformer(pTransformer);
 	lyDestroyTensor(pTokens);
-
-	if (pTransformer)
-	{
-		lyDestroyTransformer(pTransformer);
-		pTransformer = NULL;
-	}
 }
 
 void test_PrecomputeFreqsCis(void)
@@ -82,7 +145,7 @@ void test_PrecomputeFreqsCis(void)
 int main(void)
 {
 	UNITY_BEGIN();
-	RUN_TEST(test_TransformerForward);
-	// RUN_TEST(test_PrecomputeFreqsCis);
+	// RUN_TEST(test_TransformerForward);
+	RUN_TEST(test_PrecomputeFreqsCis);
 	return UNITY_END();
 }

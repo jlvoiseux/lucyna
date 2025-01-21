@@ -421,8 +421,91 @@ bool lyTensorSetComplexItem(lyTensor* pTensor, int32_t row, int32_t col, float r
 	{
 		return false;
 	}
-	
+
 	int32_t baseIdx = row * pTensor->shape[1] * 2 + col * 2;
 	setComplexItemKernel<<<1, 1>>>(pTensor->data, baseIdx, real, imag);
 	return cudaGetLastError() == cudaSuccess;
+}
+
+void lyTensorPrint(const lyTensor* pTensor)
+{
+	if (!pTensor || !pTensor->data)
+	{
+		printf("Tensor is null or uninitialized.\n");
+		return;
+	}
+
+	printf("Tensor Metadata:\n");
+	printf("Name: %s\n", pTensor->name ? pTensor->name : "Unnamed");
+	printf("Rank: %d\n", pTensor->rank);
+	printf("Shape: ");
+	for (int32_t i = 0; i < pTensor->rank; i++)
+	{
+		printf("%d%s", pTensor->shape[i], (i < pTensor->rank - 1) ? " x " : "\n");
+	}
+
+	if (pTensor->rank > 3)
+	{
+		printf("Error: Printing tensors with rank > 3 is not supported.\n");
+		return;
+	}
+
+	size_t elements = 1;
+	for (int32_t i = 0; i < pTensor->rank; i++)
+	{
+		elements *= pTensor->shape[i];
+	}
+
+	nv_bfloat16* hostData = (nv_bfloat16*)malloc(pTensor->dataSize);
+	if (!hostData)
+	{
+		printf("Error: Failed to allocate memory for tensor data.\n");
+		return;
+	}
+
+	if (cudaMemcpy(hostData, pTensor->data, pTensor->dataSize, cudaMemcpyDeviceToHost) != cudaSuccess)
+	{
+		printf("Error: Failed to copy tensor data from device to host.\n");
+		free(hostData);
+		return;
+	}
+
+	printf("Tensor Data:\n");
+	if (pTensor->rank == 1)
+	{
+		for (int32_t i = 0; i < pTensor->shape[0]; i++)
+		{
+			printf("%f ", __bfloat162float(hostData[i]));
+		}
+		printf("\n");
+	}
+	else if (pTensor->rank == 2)
+	{
+		for (int32_t i = 0; i < pTensor->shape[0]; i++)
+		{
+			for (int32_t j = 0; j < pTensor->shape[1]; j++)
+			{
+				printf("%f ", __bfloat162float(hostData[i * pTensor->shape[1] + j]));
+			}
+			printf("\n");
+		}
+	}
+	else if (pTensor->rank == 3)
+	{
+		for (int32_t i = 0; i < pTensor->shape[0]; i++)
+		{
+			printf("Slice %d:\n", i);
+			for (int32_t j = 0; j < pTensor->shape[1]; j++)
+			{
+				for (int32_t k = 0; k < pTensor->shape[2]; k++)
+				{
+					printf("%f ", __bfloat162float(hostData[i * pTensor->shape[1] * pTensor->shape[2] + j * pTensor->shape[2] + k]));
+				}
+				printf("\n");
+			}
+			printf("\n");
+		}
+	}
+
+	free(hostData);
 }
