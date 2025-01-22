@@ -109,7 +109,7 @@ bool lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, 
 	lyDestroyTensor(normalizedInput);
 
 	lyTensor* residual;
-	if (!lyTensorAdd(&residual, pInput, attnOutput))
+	if (!lyTensorScaleAndAdd(&residual, pInput, attnOutput, 1.f, 1.f))
 	{
 		lyDestroyTensor(attnOutput);
 		return false;
@@ -132,7 +132,7 @@ bool lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, 
 	}
 	lyDestroyTensor(normalizedResidual);
 
-	if (!lyTensorAdd(ppOutput, residual, ffnOutput))
+	if (!lyTensorScaleAndAdd(ppOutput, residual, ffnOutput, 1.f, 1.f))
 	{
 		lyDestroyTensor(ffnOutput);
 		lyDestroyTensor(residual);

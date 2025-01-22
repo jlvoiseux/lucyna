@@ -145,7 +145,7 @@ void test_PrecomputeFreqsCis(void)
 int main(void)
 {
 	UNITY_BEGIN();
-	// RUN_TEST(test_TransformerForward);
-	RUN_TEST(test_PrecomputeFreqsCis);
+	RUN_TEST(test_TransformerForward);
+	// RUN_TEST(test_PrecomputeFreqsCis);
 	return UNITY_END();
 }

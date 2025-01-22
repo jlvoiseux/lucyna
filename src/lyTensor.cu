@@ -157,6 +157,28 @@ bool lySetTensorShape(lyTensor* pTensor, const int32_t* pShape, int32_t rank)
 	return true;
 }
 
+static bool checkGpuMemory(const char* operation, size_t requestedBytes)
+{
+	size_t		free, total;
+	cudaError_t error = cudaMemGetInfo(&free, &total);
+	if (error != cudaSuccess)
+	{
+		printf("Failed to query GPU memory: %s\n", cudaGetErrorString(error));
+		return false;
+	}
+
+	double freeGb	   = free / (1024.0 * 1024.0 * 1024.0);
+	double totalGb	   = total / (1024.0 * 1024.0 * 1024.0);
+	double requestedGb = requestedBytes / (1024.0 * 1024.0 * 1024.0);
+
+	printf("GPU Memory Status for %s:\n", operation);
+	printf("  Total: %.2f GB\n", totalGb);
+	printf("  Free: %.2f GB\n", freeGb);
+	printf("  Requested: %.2f GB\n", requestedGb);
+
+	return free >= requestedBytes;
+}
+
 bool lySetTensorData(lyTensor* pTensor, const nv_bfloat16* pData, size_t dataSize)
 {
 	if (!pTensor)
@@ -168,6 +190,12 @@ bool lySetTensorData(lyTensor* pTensor, const nv_bfloat16* pData, size_t dataSiz
 	{
 		cudaFree(pTensor->data);
 		pTensor->data = NULL;
+	}
+
+	if (!checkGpuMemory("tensor allocation", dataSize))
+	{
+		printf("Not enough GPU memory for tensor allocation\n");
+		// return false;
 	}
 
 	nv_bfloat16* gpuData = NULL;

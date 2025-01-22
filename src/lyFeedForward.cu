@@ -30,12 +30,18 @@ bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, i
 
 	pFeedForward->ffnHiddenDim = pModel->args.multipleOf * ((pFeedForward->ffnHiddenDim + pModel->args.multipleOf - 1) / pModel->args.multipleOf);
 
-	char tensorName[64];
+	char	tensorName[64];
+	int32_t perm[] = {1, 0};
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w1.weight", layerIndex);
 	if (!lyGetModelTensor(&pFeedForward->ffnGate, pModel, tensorName))
 	{
-		free(pFeedForward);
+		lyDestroyFeedForward(pFeedForward);
+		return false;
+	}
+	if (!lyTensorTranspose(&pFeedForward->ffnGate, pFeedForward->ffnGate, perm))
+	{
+		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
 
@@ -45,9 +51,19 @@ bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, i
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
+	if (!lyTensorTranspose(&pFeedForward->ffnDown, pFeedForward->ffnDown, perm))
+	{
+		lyDestroyFeedForward(pFeedForward);
+		return false;
+	}
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w3.weight", layerIndex);
 	if (!lyGetModelTensor(&pFeedForward->ffnUp, pModel, tensorName))
+	{
+		lyDestroyFeedForward(pFeedForward);
+		return false;
+	}
+	if (!lyTensorTranspose(&pFeedForward->ffnUp, pFeedForward->ffnUp, perm))
 	{
 		lyDestroyFeedForward(pFeedForward);
 		return false;

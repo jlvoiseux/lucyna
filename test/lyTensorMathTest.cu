@@ -25,17 +25,25 @@ void tearDown(void)
 	}
 }
 
-void test_TensorAdd(void)
+void test_TensorScaleAndAdd2D(void)
 {
-	int32_t shape[] = {2, 2};
+	// Test with 2D tensors
+	int32_t shape[] = {2, 3};
 	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shape, 2));
 	TEST_ASSERT_TRUE(lySetTensorShape(pTensorB, shape, 2));
 
-	nv_bfloat16 dataA[4], dataB[4];
-	for (int i = 0; i < 4; i++)
+	// Initialize tensor A with values 1,2,3,4,5,6
+	nv_bfloat16 dataA[6];
+	for (int i = 0; i < 6; i++)
 	{
-		dataA[i] = __float2bfloat16((float)i);
-		dataB[i] = __float2bfloat16((float)(i + 1));
+		dataA[i] = __float2bfloat16((float)(i + 1));
+	}
+
+	// Initialize tensor B with values 0.5,1.0,1.5,2.0,2.5,3.0
+	nv_bfloat16 dataB[6];
+	for (int i = 0; i < 6; i++)
+	{
+		dataB[i] = __float2bfloat16((float)(i + 1) * 0.5f);
 	}
 
 	TEST_ASSERT_TRUE(lySetTensorData(pTensorA, dataA, sizeof(dataA)));
@@ -43,19 +51,138 @@ void test_TensorAdd(void)
 	cudaDeviceSynchronize();
 
 	lyTensor* pOutput;
-	TEST_ASSERT_TRUE(lyTensorAdd(&pOutput, pTensorA, pTensorB));
+	float	  alpha = 2.0f;
+	float	  beta	= -1.0f;
+	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, alpha, beta));
 	cudaDeviceSynchronize();
 
-	nv_bfloat16 result[4];
+	nv_bfloat16 result[6];
 	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
 
-	for (int i = 0; i < 4; i++)
+	// Expected: 2*A - B
+	float expected[] = {1.5f, 3.0f, 4.5f, 6.0f, 7.5f, 9.0f};
+	for (int i = 0; i < 6; i++)
 	{
-		float expected = (float)i + (float)(i + 1);
-		float actual   = __bfloat162float(result[i]);
-		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(result[i]));
 	}
 
+	lyDestroyTensor(pOutput);
+}
+
+void test_TensorScaleAndAdd3D(void)
+{
+	// Test with 3D tensors
+	int32_t shape[] = {2, 2, 2};
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shape, 3));
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorB, shape, 3));
+
+	size_t		 elements = 8;
+	nv_bfloat16* dataA	  = (nv_bfloat16*)malloc(elements * sizeof(nv_bfloat16));
+	nv_bfloat16* dataB	  = (nv_bfloat16*)malloc(elements * sizeof(nv_bfloat16));
+
+	for (size_t i = 0; i < elements; i++)
+	{
+		dataA[i] = __float2bfloat16((float)(i + 1));
+		dataB[i] = __float2bfloat16((float)(i + 1) * 0.1f);
+	}
+
+	TEST_ASSERT_TRUE(lySetTensorData(pTensorA, dataA, elements * sizeof(nv_bfloat16)));
+	TEST_ASSERT_TRUE(lySetTensorData(pTensorB, dataB, elements * sizeof(nv_bfloat16)));
+	cudaDeviceSynchronize();
+
+	lyTensor* pOutput;
+	float	  alpha = 0.5f;
+	float	  beta	= 2.0f;
+	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, alpha, beta));
+	cudaDeviceSynchronize();
+
+	nv_bfloat16* result = (nv_bfloat16*)malloc(elements * sizeof(nv_bfloat16));
+	cudaMemcpy(result, pOutput->data, elements * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
+
+	for (size_t i = 0; i < elements; i++)
+	{
+		float expected = 0.5f * (float)(i + 1) + 2.0f * ((float)(i + 1) * 0.1f);
+		float actual   = __bfloat162float(result[i]);
+		TEST_ASSERT_FLOAT_WITHIN(0.05f, expected, actual);
+	}
+
+	free(dataA);
+	free(dataB);
+	free(result);
+	lyDestroyTensor(pOutput);
+}
+
+void test_TensorScaleAndAddInvalidShapes(void)
+{
+	int32_t shapeA[] = {2, 3};
+	int32_t shapeB[] = {2, 3, 2};
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shapeA, 2));
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorB, shapeB, 3));
+
+	lyTensor* pOutput;
+	TEST_ASSERT_FALSE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, 1.0f, 1.0f));
+
+	// Test tensors with same rank but different dimensions
+	int32_t shapeC[] = {2, 4};
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorB, shapeC, 2));
+	TEST_ASSERT_FALSE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, 1.0f, 1.0f));
+}
+
+void test_TensorScaleAndAddRank1Invalid(void)
+{
+	int32_t shape[] = {3};
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shape, 1));
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorB, shape, 1));
+
+	lyTensor* pOutput;
+	TEST_ASSERT_FALSE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, 1.0f, 1.0f));
+}
+
+void test_TensorScaleAndAddBroadcast(void)
+{
+	// Create tensor A with shape (2, 3, 4)
+	int32_t shapeA[] = {2, 3, 4};
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shapeA, 3));
+
+	// Create tensor B with shape (3, 4)
+	int32_t shapeB[] = {3, 4};
+	TEST_ASSERT_TRUE(lySetTensorShape(pTensorB, shapeB, 2));
+
+	// Initialize tensor A with values 1,2,3,...,24
+	nv_bfloat16* dataA = (nv_bfloat16*)malloc(24 * sizeof(nv_bfloat16));
+	for (int i = 0; i < 24; i++)
+	{
+		dataA[i] = __float2bfloat16((float)(i + 1));
+	}
+
+	// Initialize tensor B with values 0.1,0.2,0.3,...,1.2
+	nv_bfloat16* dataB = (nv_bfloat16*)malloc(12 * sizeof(nv_bfloat16));
+	for (int i = 0; i < 12; i++)
+	{
+		dataB[i] = __float2bfloat16((float)(i + 1) * 0.1f);
+	}
+
+	TEST_ASSERT_TRUE(lySetTensorData(pTensorA, dataA, 24 * sizeof(nv_bfloat16)));
+	TEST_ASSERT_TRUE(lySetTensorData(pTensorB, dataB, 12 * sizeof(nv_bfloat16)));
+	cudaDeviceSynchronize();
+
+	lyTensor* pOutput;
+	float	  alpha = 2.0f;
+	float	  beta	= -1.0f;
+	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, alpha, beta));
+	cudaDeviceSynchronize();
+
+	nv_bfloat16* result = (nv_bfloat16*)malloc(24 * sizeof(nv_bfloat16));
+	cudaMemcpy(result, pOutput->data, 24 * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
+
+	// Verify first few elements
+	TEST_ASSERT_FLOAT_WITHIN(0.05f, 1.9f, __bfloat162float(result[0]));
+	TEST_ASSERT_FLOAT_WITHIN(0.05f, 3.8f, __bfloat162float(result[1]));
+	TEST_ASSERT_FLOAT_WITHIN(0.05f, 5.7f, __bfloat162float(result[2]));
+
+	free(dataA);
+	free(dataB);
+	free(result);
 	lyDestroyTensor(pOutput);
 }
 
@@ -194,38 +321,6 @@ void test_MatMul4D(void)
 	lyDestroyTensor(pOutput);
 }
 
-void test_TensorScaleAndAdd(void)
-{
-	int32_t shape[] = {2, 2};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shape, 2));
-
-	nv_bfloat16 data[4];
-	for (int i = 0; i < 4; i++)
-	{
-		data[i] = __float2bfloat16((float)i);
-	}
-
-	TEST_ASSERT_TRUE(lySetTensorData(pTensorA, data, sizeof(data)));
-	cudaDeviceSynchronize();
-
-	lyTensor* pOutput;
-	float	  scale = 2.0f;
-	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, NULL, scale));
-	cudaDeviceSynchronize();
-
-	nv_bfloat16 result[4];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
-	for (int i = 0; i < 4; i++)
-	{
-		float expected = (float)i * scale;
-		float actual   = __bfloat162float(result[i]);
-		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
-	}
-
-	lyDestroyTensor(pOutput);
-}
-
 void test_TensorElementwiseMul(void)
 {
 	int32_t shape[] = {2, 2};
@@ -265,7 +360,6 @@ void test_TensorMakeTriangularMask(void)
 	int32_t shape[] = {3, 3};
 	TEST_ASSERT_TRUE(lySetTensorShape(pTensorA, shape, 2));
 	TEST_ASSERT_TRUE(lySetTensorData(pTensorA, NULL, 9 * sizeof(nv_bfloat16)));
-	cudaDeviceSynchronize();
 
 	TEST_ASSERT_TRUE(lyTensorMakeTriangularMask(pTensorA));
 	cudaDeviceSynchronize();
@@ -424,11 +518,7 @@ void test_TensorTranspose(void)
 	lyTensor* pOutput;
 	int32_t	  perm[] = {1, 0};
 
-	lyTensorPrint(pTensorA);
-
 	TEST_ASSERT_TRUE(lyTensorTranspose(&pOutput, pTensorA, perm));
-
-	lyTensorPrint(pOutput);
 
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->rank);
 	TEST_ASSERT_EQUAL_INT32(3, pOutput->shape[0]);
@@ -514,6 +604,7 @@ void test_TensorTransposeLarge(void)
 	lyTensor* pOutput;
 	int32_t	  perm[] = {0, 2, 1};
 	TEST_ASSERT_TRUE(lyTensorTranspose(&pOutput, pTensorA, perm));
+	cudaDeviceSynchronize();
 
 	TEST_ASSERT_EQUAL_INT32(3, pOutput->rank);
 	TEST_ASSERT_EQUAL_INT32(seqLen, pOutput->shape[0]);
@@ -552,13 +643,16 @@ void test_TensorTransposeLarge(void)
 int main(void)
 {
 	UNITY_BEGIN();
-	RUN_TEST(test_TensorAdd);
+	RUN_TEST(test_TensorScaleAndAdd2D);
+	RUN_TEST(test_TensorScaleAndAdd3D);
+	RUN_TEST(test_TensorScaleAndAddInvalidShapes);
+	RUN_TEST(test_TensorScaleAndAddRank1Invalid);
+	RUN_TEST(test_TensorScaleAndAddBroadcast);
 	RUN_TEST(test_MatMul2D);
 	RUN_TEST(test_MatMul3D);
 	RUN_TEST(test_MatMulInvalidShapes);
 	RUN_TEST(test_MatMulDifferentRanks);
 	RUN_TEST(test_MatMul4D);
-	RUN_TEST(test_TensorScaleAndAdd);
 	RUN_TEST(test_TensorElementwiseMul);
 	RUN_TEST(test_TensorMakeTriangularMask);
 	RUN_TEST(test_TensorArgmax);

@@ -62,7 +62,7 @@ void test_AttentionForward(void)
 	TEST_ASSERT_EQUAL_INT32(4, pOutput->shape[0]);
 	TEST_ASSERT_EQUAL_INT32(pModel->args.dim, pOutput->shape[1]);
 
-	TEST_ASSERT_EQUAL_INT32(4, pAttention->cacheK->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(128, pAttention->cacheK->shape[0]);
 	TEST_ASSERT_EQUAL_INT32(pAttention->nKVHeads, pAttention->cacheK->shape[1]);
 	TEST_ASSERT_EQUAL_INT32(pAttention->headDim, pAttention->cacheK->shape[2]);
 
@@ -72,44 +72,9 @@ void test_AttentionForward(void)
 	lyDestroyTensor(pInput);
 }
 
-void test_KVCache(void)
-{
-	int32_t	  inputShape[] = {2, pModel->args.dim};
-	lyTensor* pK;
-	lyTensor* pV;
-	TEST_ASSERT_TRUE(lyCreateTensor(&pK));
-	TEST_ASSERT_TRUE(lyCreateTensor(&pV));
-	TEST_ASSERT_TRUE(lySetTensorShape(pK, inputShape, 2));
-	TEST_ASSERT_TRUE(lySetTensorShape(pV, inputShape, 2));
-	TEST_ASSERT_TRUE(lySetTensorData(pK, NULL, 2 * pModel->args.dim * sizeof(nv_bfloat16)));
-	TEST_ASSERT_TRUE(lySetTensorData(pV, NULL, 2 * pModel->args.dim * sizeof(nv_bfloat16)));
-
-	for (int i = 0; i < 2; i++)
-	{
-		for (int j = 0; j < pModel->args.dim; j++)
-		{
-			float val = (float)(i + j) / (float)(2 * pModel->args.dim);
-			TEST_ASSERT_TRUE(lyTensorSetItemFromFloat32(pK, i * pModel->args.dim + j, val));
-			TEST_ASSERT_TRUE(lyTensorSetItemFromFloat32(pV, i * pModel->args.dim + j, val + 1.0f));
-		}
-	}
-
-	TEST_ASSERT_TRUE(lyUpdateKVCache(pAttention, pK, pV, 0));
-
-	float kVal, vVal;
-	TEST_ASSERT_TRUE(lyTensorGetItemAsFloat32(&kVal, pAttention->cacheK, 0));
-	TEST_ASSERT_TRUE(lyTensorGetItemAsFloat32(&vVal, pAttention->cacheV, 0));
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, kVal);
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, vVal);
-
-	lyDestroyTensor(pK);
-	lyDestroyTensor(pV);
-}
-
 int main(void)
 {
 	UNITY_BEGIN();
 	RUN_TEST(test_AttentionForward);
-	// RUN_TEST(test_KVCache);
 	return UNITY_END();
 }

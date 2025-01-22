@@ -59,12 +59,15 @@ bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
 		return false;
 	}
 
+	int32_t	  perm[] = {1, 0};
 	lyTensor* output;
 	if (!lyGetModelTensor(&output, pModel, "output.weight") || !lySetTensorShape(output, embeddingsShape, 2))
 	{
 		lyDestroyTransformer(pTransformer);
 		return false;
 	}
+	if (!lyTensorTranspose(&output, output, perm))
+		;
 	pTransformer->output = output;
 
 	if (!precomputeFreqsCis(&pTransformer->freqsCis, pTransformer->dim / pModel->args.nHeads, pModel->args.maxSequenceLength * 2, pModel->args.ropeTheta))

@@ -180,6 +180,7 @@ bool lyLoadModelArgs(lyModel* pModel, const char* modelDir)
 	}
 
 	pModel->args.headDim = pModel->args.dim / pModel->args.nHeads;
+	pModel->args.nRep	 = pModel->args.nHeads / pModel->args.nKVHeads;
 
 	fclose(configFile);
 	return true;
@@ -298,6 +299,15 @@ bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, b
 		}
 
 		if (!lySetTensorName(&pModel->tensors[i], tensors->keys[i]) || (srcTensor->rank > 0 && !lySetTensorShape(&pModel->tensors[i], srcTensor->shape, srcTensor->rank)) || !lySetTensorData(&pModel->tensors[i], srcTensor->data, srcTensor->dataSize))
+		{
+			lyDestroyDict(tensors);
+			lyDestroyPickleReader(pReader);
+			lyCloseZip(pZip);
+			lyDestroyModel(pModel);
+			return false;
+		}
+
+		if (cudaFree(srcTensor->data) != cudaSuccess)
 		{
 			lyDestroyDict(tensors);
 			lyDestroyPickleReader(pReader);

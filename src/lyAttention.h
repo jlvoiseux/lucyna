@@ -20,8 +20,6 @@ typedef struct lyAttention
 	lyTensor* cacheV;
 } lyAttention;
 
-bool lyUpdateKVCache(lyAttention* pAttention, const lyTensor* pK, const lyTensor* pV, int32_t startPos);
-
 bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex);
 void lyDestroyAttention(lyAttention* pAttention);
 bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTensor* pInput, int32_t startPos, const lyTensor* pFreqsCis, const lyTensor* pMask);

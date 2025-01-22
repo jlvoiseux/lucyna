@@ -1,8 +1,7 @@
 #include "lyTensorMath.h"
 
 #include <cuda_bf16.h>
-
-#define LY_MAX_RANK 4
+#include <math_constants.h>
 
 static int lyTensorGetElementCount(const lyTensor* pTensor)
 {
@@ -22,24 +21,6 @@ static int32_t getTotalSize(const int32_t* shape, int32_t rank)
 		size *= shape[i];
 	}
 	return size;
-}
-
-void calculateStrides(int32_t* strides, const int32_t* shape, int32_t rank)
-{
-	strides[rank - 1] = 1;
-	for (int32_t i = rank - 2; i >= 0; i--)
-	{
-		strides[i] = strides[i + 1] * shape[i + 1];
-	}
-}
-
-__global__ void tensorAddKernel(nv_bfloat16* output, const nv_bfloat16* a, const nv_bfloat16* b, int size)
-{
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx >= size)
-		return;
-
-	output[idx] = __hadd(a[idx], b[idx]);
 }
 
 __global__ void tensorMatMulKernel(nv_bfloat16* output, const nv_bfloat16* a, const nv_bfloat16* b, const int32_t* aStrides, const int32_t* bStrides, const int32_t* outStrides, const int32_t* aShape, const int32_t* bShape, int32_t rank, int32_t batchSize, int32_t m, int32_t n, int32_t k)
@@ -72,20 +53,38 @@ __global__ void tensorMatMulKernel(nv_bfloat16* output, const nv_bfloat16* a, co
 	output[idx] = sum;
 }
 
-__global__ void tensorScaleAndAddKernel(nv_bfloat16* output, const nv_bfloat16* input, const nv_bfloat16* mask, float scale, int numRows, int numCols)
+__global__ void tensorScaleAndAddBroadcastKernel(nv_bfloat16* output, const nv_bfloat16* a, const nv_bfloat16* b, float alpha, float beta, int32_t* aShape, int32_t* bShape, int32_t aRank, int32_t bRank, int32_t totalElements)
 {
-	int row = blockIdx.y * blockDim.y + threadIdx.y;
-	int col = blockIdx.x * blockDim.x + threadIdx.x;
+	int32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx >= totalElements)
+		return;
 
-	if (row < numRows && col < numCols)
+	// Calculate indices for tensor A
+	int32_t remaining = idx;
+	int32_t aIndex	  = 0;
+	int32_t bIndex	  = 0;
+	int32_t stride	  = 1;
+
+	// Calculate strided indices for both tensors
+	for (int32_t i = aRank - 1; i >= 0; i--)
 	{
-		int idx		= row * numCols + col;
-		output[idx] = __hmul(input[idx], __float2bfloat16(scale));
-		if (mask)
+		int32_t dim = remaining % aShape[i];
+		remaining /= aShape[i];
+
+		// For B, only use the last bRank dimensions
+		if (i >= aRank - bRank)
 		{
-			output[idx] = __hadd(output[idx], mask[idx]);
+			int32_t bDim = dim % bShape[i - (aRank - bRank)];
+			bIndex += bDim * stride;
 		}
+
+		aIndex += dim * stride;
+		stride *= aShape[i];
 	}
+
+	nv_bfloat16 valA = __hmul(a[aIndex], __float2bfloat16(alpha));
+	nv_bfloat16 valB = __hmul(b[bIndex], __float2bfloat16(beta));
+	output[idx]		 = __hadd(valA, valB);
 }
 
 __global__ void tensorElementwiseMulKernel(nv_bfloat16* output, const nv_bfloat16* a, const nv_bfloat16* b, int size)
@@ -104,7 +103,7 @@ __global__ void triangularMaskKernel(nv_bfloat16* output, int32_t rows, int32_t 
 
 	if (row < rows && col < cols)
 	{
-		float val				 = col <= row ? 0.0f : -INFINITY;
+		float val				 = col <= row ? 0.0f : -CUDART_INF_F;
 		output[row * cols + col] = __float2bfloat16(val);
 	}
 }
@@ -117,7 +116,7 @@ __global__ void tensorArgmaxKernel(nv_bfloat16* output, const nv_bfloat16* input
 		return;
 	}
 
-	float	maxVal = -INFINITY;
+	float	maxVal = -CUDART_INF_F;
 	int32_t maxIdx = 0;
 
 	for (int32_t i = 0; i < dimSize; i++)
@@ -157,76 +156,60 @@ __global__ void tensorEmbeddingKernel(nv_bfloat16* output, const nv_bfloat16* to
 	output[idx] = embeddings[tokenId * dim + dimPos];
 }
 
-__global__ void tensorTransposeKernel(nv_bfloat16* output, const nv_bfloat16* input, const int32_t* inputShape, const int32_t* inputStrides, const int32_t* outputStrides, const int32_t* perm, int32_t rank, int32_t elementCount)
+__global__ void tensorTransposeKernel2(nv_bfloat16* output, const nv_bfloat16* input, const int32_t* dims, const int32_t* axesMap, int32_t rank, size_t totalElements)
 {
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx >= elementCount)
+	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (idx >= totalElements)
 		return;
 
-	int32_t inputIdx				 = idx;
-	int32_t multiDimIdx[LY_MAX_RANK] = {0};
+	int32_t row	   = idx / dims[1];
+	int32_t col	   = idx % dims[1];
+	size_t	dstIdx = col * dims[0] + row;
+	output[dstIdx] = input[idx];
+}
+
+__device__ size_t getLinearIndex(const int32_t* indices, const int32_t* dims, int32_t rank)
+{
+	size_t linearIdx = 0;
+	size_t stride	 = 1;
 
 	for (int32_t i = rank - 1; i >= 0; i--)
 	{
-		multiDimIdx[i] = inputIdx / inputStrides[i];
-		inputIdx %= inputStrides[i];
+		linearIdx += indices[i] * stride;
+		stride *= dims[i];
 	}
-
-	int32_t outputIdx = 0;
-	for (int32_t i = 0; i < rank; i++)
-	{
-		outputIdx += multiDimIdx[perm[i]] * outputStrides[i];
-	}
-
-	output[outputIdx] = input[idx];
+	return linearIdx;
 }
 
-bool lyTensorAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
+__device__ void getIndices(size_t linearIdx, int32_t* indices, const int32_t* dims, int32_t rank)
 {
-	if (!ppOutput || !pA || !pB || !pA->data || !pB->data)
+	size_t remaining = linearIdx;
+
+	for (int32_t i = rank - 1; i >= 0; i--)
 	{
-		return false;
+		indices[i] = remaining % dims[i];
+		remaining /= dims[i];
+	}
+}
+
+__global__ void tensorTransposeKernel3(nv_bfloat16* output, const nv_bfloat16* input, const int32_t* dims, const int32_t* axesMap, int32_t rank, size_t totalElements)
+{
+	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (idx >= totalElements)
+		return;
+
+	int32_t srcIndices[8];
+	int32_t dstIndices[8];
+	getIndices(idx, srcIndices, dims, rank);
+	for (int32_t i = 0; i < rank; i++)
+	{
+		dstIndices[axesMap[i]] = srcIndices[i];
 	}
 
-	if (pA->rank != pB->rank)
-	{
-		return false;
-	}
-	for (int i = 0; i < pA->rank; i++)
-	{
-		if (pA->shape[i] != pB->shape[i])
-		{
-			return false;
-		}
-	}
-
-	lyTensor* pOutput;
-	if (!lyCreateTensor(&pOutput))
-	{
-		return false;
-	}
-
-	if (!lySetTensorShape(pOutput, pA->shape, pA->rank) || !lySetTensorData(pOutput, NULL, lyTensorGetElementCount(pOutput) * sizeof(nv_bfloat16)))
-	{
-		lyDestroyTensor(pOutput);
-		return false;
-	}
-
-	int size	  = lyTensorGetElementCount(pOutput);
-	int blockSize = 256;
-	int gridSize  = (size + blockSize - 1) / blockSize;
-
-	tensorAddKernel<<<gridSize, blockSize>>>(pOutput->data, pA->data, pB->data, size);
-
-	cudaError_t error = cudaGetLastError();
-	if (error != cudaSuccess)
-	{
-		lyDestroyTensor(pOutput);
-		return false;
-	}
-
-	*ppOutput = pOutput;
-	return true;
+	size_t dstIdx  = getLinearIndex(dstIndices, dims, rank);
+	output[dstIdx] = input[idx];
 }
 
 bool lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
@@ -332,34 +315,57 @@ bool lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 	return true;
 }
 
-bool lyTensorScaleAndAdd(lyTensor** ppOutput, lyTensor* pInput, const lyTensor* pMask, float scale)
+bool lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB, float alpha, float beta)
 {
-	if (!ppOutput || !pInput || !pInput->data)
-	{
+	if (!ppOutput || !pA || !pB || !pA->data || !pB->data || pA->rank < 2 || pB->rank < 2)
 		return false;
-	}
 
-	if (pInput->rank != 2)
-	{
+	// Verify shape compatibility for broadcasting
+	if (pB->rank > pA->rank)
 		return false;
+
+	// Check if dimensions match for broadcasting
+	for (int32_t i = 0; i < pB->rank; i++)
+	{
+		int32_t aIdx = pA->rank - pB->rank + i;
+		if (pB->shape[i] != pA->shape[aIdx])
+			return false;
 	}
 
 	lyTensor* pOutput;
 	if (!lyCreateTensor(&pOutput))
-	{
 		return false;
-	}
 
-	if (!lySetTensorShape(pOutput, pInput->shape, pInput->rank) || !lySetTensorData(pOutput, NULL, lyTensorGetElementCount(pOutput) * sizeof(nv_bfloat16)))
+	if (!lySetTensorShape(pOutput, pA->shape, pA->rank))
 	{
 		lyDestroyTensor(pOutput);
 		return false;
 	}
 
-	dim3 blockSize(16, 16);
-	dim3 gridSize((pInput->shape[1] + blockSize.x - 1) / blockSize.x, (pInput->shape[0] + blockSize.y - 1) / blockSize.y);
+	int32_t totalElements = 1;
+	for (int32_t i = 0; i < pA->rank; i++)
+		totalElements *= pA->shape[i];
 
-	tensorScaleAndAddKernel<<<gridSize, blockSize>>>(pOutput->data, pInput->data, pMask ? pMask->data : nullptr, scale, pInput->shape[0], pInput->shape[1]);
+	if (!lySetTensorData(pOutput, NULL, totalElements * sizeof(nv_bfloat16)))
+	{
+		lyDestroyTensor(pOutput);
+		return false;
+	}
+
+	// Allocate and copy shape arrays to device
+	int32_t *dAShape, *dBShape;
+	cudaMalloc(&dAShape, pA->rank * sizeof(int32_t));
+	cudaMalloc(&dBShape, pB->rank * sizeof(int32_t));
+	cudaMemcpy(dAShape, pA->shape, pA->rank * sizeof(int32_t), cudaMemcpyHostToDevice);
+	cudaMemcpy(dBShape, pB->shape, pB->rank * sizeof(int32_t), cudaMemcpyHostToDevice);
+
+	int32_t blockSize = 256;
+	int32_t numBlocks = (totalElements + blockSize - 1) / blockSize;
+
+	tensorScaleAndAddBroadcastKernel<<<numBlocks, blockSize>>>(pOutput->data, pA->data, pB->data, alpha, beta, dAShape, dBShape, pA->rank, pB->rank, totalElements);
+
+	cudaFree(dAShape);
+	cudaFree(dBShape);
 
 	cudaError_t error = cudaGetLastError();
 	if (error != cudaSuccess)
@@ -586,15 +592,12 @@ bool lyTensorEmbedding(lyTensor** ppOutput, const lyTensor* pTokens, const lyTen
 	return true;
 }
 
-bool lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_t* perm)
+bool lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_t* pPerm)
 {
-	if (!ppOutput || !pInput || !pInput->data || !perm || pInput->rank < 2)
+	if (!ppOutput || !pInput || !pPerm || pInput->rank < 2)
 	{
 		return false;
 	}
-
-	int32_t rank		 = pInput->rank;
-	int32_t elementCount = lyTensorGetElementCount(pInput);
 
 	lyTensor* pOutput;
 	if (!lyCreateTensor(&pOutput))
@@ -602,74 +605,78 @@ bool lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_
 		return false;
 	}
 
-	int32_t* outputShape = (int32_t*)malloc(rank * sizeof(int32_t));
-	if (!outputShape)
+	int32_t* newShape = (int32_t*)malloc(sizeof(int32_t) * pInput->rank);
+	if (!newShape)
 	{
 		lyDestroyTensor(pOutput);
 		return false;
 	}
 
-	for (int32_t i = 0; i < rank; i++)
+	for (int32_t i = 0; i < pInput->rank; i++)
 	{
-		outputShape[i] = pInput->shape[perm[i]];
+		newShape[i] = pInput->shape[pPerm[i]];
 	}
 
-	if (!lySetTensorShape(pOutput, outputShape, rank) || !lySetTensorData(pOutput, NULL, elementCount * sizeof(nv_bfloat16)))
+	if (!lySetTensorShape(pOutput, newShape, pInput->rank))
 	{
-		free(outputShape);
-		lyDestroyTensor(pOutput);
-		return false;
-	}
-	free(outputShape);
-
-	int32_t* inputStrides  = (int32_t*)malloc(rank * sizeof(int32_t));
-	int32_t* outputStrides = (int32_t*)malloc(rank * sizeof(int32_t));
-	if (!inputStrides || !outputStrides)
-	{
-		free(inputStrides);
-		free(outputStrides);
+		free(newShape);
 		lyDestroyTensor(pOutput);
 		return false;
 	}
 
-	calculateStrides(inputStrides, pInput->shape, rank);
-	calculateStrides(outputStrides, pOutput->shape, rank);
+	size_t totalElements = 1;
+	for (int32_t i = 0; i < pInput->rank; i++)
+	{
+		totalElements *= pInput->shape[i];
+	}
 
-	int32_t *dInputShape, *dInputStrides, *dOutputStrides, *dPerm;
-	cudaMalloc(&dInputShape, sizeof(int32_t) * rank);
-	cudaMalloc(&dInputStrides, sizeof(int32_t) * rank);
-	cudaMalloc(&dOutputStrides, sizeof(int32_t) * rank);
-	cudaMalloc(&dPerm, sizeof(int32_t) * rank);
+	if (!lySetTensorData(pOutput, NULL, totalElements * sizeof(nv_bfloat16)))
+	{
+		free(newShape);
+		lyDestroyTensor(pOutput);
+		return false;
+	}
 
-	cudaMemcpy(dInputShape, pInput->shape, sizeof(int32_t) * rank, cudaMemcpyHostToDevice);
-	cudaMemcpy(dInputStrides, inputStrides, sizeof(int32_t) * rank, cudaMemcpyHostToDevice);
-	cudaMemcpy(dOutputStrides, outputStrides, sizeof(int32_t) * rank, cudaMemcpyHostToDevice);
-	cudaMemcpy(dPerm, perm, sizeof(int32_t) * rank, cudaMemcpyHostToDevice);
+	int32_t *d_dims, *d_perm;
+	if (cudaMalloc(&d_dims, pInput->rank * sizeof(int32_t)) != cudaSuccess || cudaMalloc(&d_perm, pInput->rank * sizeof(int32_t)) != cudaSuccess)
+	{
+		free(newShape);
+		lyDestroyTensor(pOutput);
+		return false;
+	}
+
+	if (cudaMemcpy(d_dims, pInput->shape, pInput->rank * sizeof(int32_t), cudaMemcpyHostToDevice) != cudaSuccess || cudaMemcpy(d_perm, pPerm, pInput->rank * sizeof(int32_t), cudaMemcpyHostToDevice) != cudaSuccess)
+	{
+		cudaFree(d_dims);
+		cudaFree(d_perm);
+		free(newShape);
+		lyDestroyTensor(pOutput);
+		return false;
+	}
 
 	int32_t blockSize = 256;
-	int32_t gridSize  = (elementCount + blockSize - 1) / blockSize;
+	int32_t numBlocks = (totalElements + blockSize - 1) / blockSize;
 
-	tensorTransposeKernel<<<gridSize, blockSize>>>(pOutput->data, pInput->data, dInputShape, dInputStrides, dOutputStrides, dPerm, rank, elementCount);
+	if (pInput->rank == 2)
+	{
+		tensorTransposeKernel2<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, d_dims, d_perm, pInput->rank, totalElements);
+	}
+	else
+	{
+		tensorTransposeKernel3<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, d_dims, d_perm, pInput->rank, totalElements);
+	}
 
 	cudaError_t error = cudaGetLastError();
+
+	cudaFree(d_dims);
+	cudaFree(d_perm);
+	free(newShape);
+
 	if (error != cudaSuccess)
 	{
-		cudaFree(dInputShape);
-		cudaFree(dInputStrides);
-		cudaFree(dOutputStrides);
-		cudaFree(dPerm);
-		free(inputStrides);
-		free(outputStrides);
 		lyDestroyTensor(pOutput);
 		return false;
 	}
-
-	cudaFree(dInputShape);
-	cudaFree(dInputStrides);
-	cudaFree(dOutputStrides);
-	cudaFree(dPerm);
-	free(inputStrides);
-	free(outputStrides);
 
 	*ppOutput = pOutput;
 	return true;
