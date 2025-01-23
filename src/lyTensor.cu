@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool validateIndex(const lyTensor* pTensor, int32_t index, size_t elementSize)
+static bool validateIndex(lyTensor* pTensor, int32_t index, size_t elementSize)
 {
 	if (!pTensor || !pTensor->data)
 	{
@@ -15,7 +15,7 @@ static bool validateIndex(const lyTensor* pTensor, int32_t index, size_t element
 	return offset < pTensor->dataSize;
 }
 
-static bool validateComplexAccess(const lyTensor* pTensor, int32_t row, int32_t col)
+static bool validateComplexAccess(lyTensor* pTensor, int32_t row, int32_t col)
 {
 	if (!pTensor || !pTensor->data || pTensor->rank != 2)
 	{
@@ -25,7 +25,7 @@ static bool validateComplexAccess(const lyTensor* pTensor, int32_t row, int32_t 
 	return row < pTensor->shape[0] && col < pTensor->shape[1];
 }
 
-static int32_t calculateIndex(const lyTensor* pTensor, const int32_t* pLoc)
+static int32_t calculateIndex(lyTensor* pTensor, const int32_t* pLoc)
 {
 	int32_t index  = 0;
 	int32_t stride = 1;
@@ -215,14 +215,15 @@ bool lySetTensorData(lyTensor* pTensor, const nv_bfloat16* pData, size_t dataSiz
 
 	if (pTensor->memoryType == LY_MEMORY_GPU)
 	{
-		if (!checkGpuMemory("tensor allocation", dataSize))
-		{
-			printf("Not enough GPU memory for tensor allocation\n");
-			return false;
-		}
+		//		if (!checkGpuMemory("tensor allocation", dataSize))
+		//		{
+		//			printf("Not enough GPU memory for tensor allocation\n");
+		//			return false;
+		//		}
 
-		nv_bfloat16* gpuData = NULL;
-		cudaError_t	 error	 = cudaMalloc(&gpuData, dataSize);
+		nv_bfloat16* gpuData	 = NULL;
+		size_t		 alignedSize = (dataSize + 15) & ~15;  // Align to 16 bytes
+		cudaError_t	 error		 = cudaMalloc(&gpuData, alignedSize);
 		if (error != cudaSuccess)
 		{
 			printf("CUDA malloc failed: %s\n", cudaGetErrorString(error));
@@ -335,7 +336,7 @@ bool lyReshapeTensor(lyTensor* pTensor, const int32_t* pShape, int32_t rank)
 	return true;
 }
 
-bool lyTensorSlice(lyTensor** ppOutput, const lyTensor* pInput, int32_t startIdx, int32_t endIdx)
+bool lyTensorSlice(lyTensor** ppOutput, lyTensor* pInput, int32_t startIdx, int32_t endIdx)
 {
 	if (!ppOutput || !pInput || startIdx < 0 || endIdx <= startIdx || endIdx > pInput->shape[0] || !pInput->data)
 	{
@@ -343,7 +344,7 @@ bool lyTensorSlice(lyTensor** ppOutput, const lyTensor* pInput, int32_t startIdx
 	}
 
 	lyTensor* pOutput;
-	if (!lyCreateTensor(&pOutput, LY_MEMORY_GPU))
+	if (!lyCreateTensor(&pOutput, LY_MEMORY_CPU))
 	{
 		return false;
 	}
@@ -387,8 +388,7 @@ bool lyTensorSetItem(lyTensor* pTensor, const int32_t* pLoc, int32_t value)
 {
 	if (pTensor->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTensor);
 	}
 
 	if (!pTensor || !pLoc)
@@ -402,11 +402,15 @@ bool lyTensorSetItem(lyTensor* pTensor, const int32_t* pLoc, int32_t value)
 		return false;
 	}
 
+	cudaDeviceSynchronize();
 	setItemFromInt32Kernel<<<1, 1>>>(pTensor->data, index, value);
+
+	lyTensorMoveToCPU(pTensor);
+
 	return cudaGetLastError() == cudaSuccess;
 }
 
-bool lyTensorGetItem(int32_t* pValue, const lyTensor* pTensor, const int32_t* pLoc)
+bool lyTensorGetItem(int32_t* pValue, lyTensor* pTensor, const int32_t* pLoc)
 {
 	if (!pValue || !pTensor || !pLoc)
 	{
@@ -429,12 +433,11 @@ bool lyTensorGetItem(int32_t* pValue, const lyTensor* pTensor, const int32_t* pL
 	return true;
 }
 
-bool lyTensorGetItemAsFloat32(float* pOut, const lyTensor* pTensor, int32_t index)
+bool lyTensorGetItemAsFloat32(float* pOut, lyTensor* pTensor, int32_t index)
 {
 	if (pTensor->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTensor);
 	}
 
 	if (!pOut || !validateIndex(pTensor, index, sizeof(nv_bfloat16)))
@@ -448,6 +451,7 @@ bool lyTensorGetItemAsFloat32(float* pOut, const lyTensor* pTensor, int32_t inde
 		return false;
 	}
 
+	cudaDeviceSynchronize();
 	getItemKernel<<<1, 1>>>(temp, pTensor->data, index);
 
 	nv_bfloat16 hostValue;
@@ -459,6 +463,9 @@ bool lyTensorGetItemAsFloat32(float* pOut, const lyTensor* pTensor, int32_t inde
 
 	cudaFree(temp);
 	*pOut = __bfloat162float(hostValue);
+
+	lyTensorMoveToCPU(pTensor);
+
 	return true;
 }
 
@@ -466,8 +473,7 @@ bool lyTensorSetItemFromFloat32(lyTensor* pTensor, int32_t index, float value)
 {
 	if (pTensor->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTensor);
 	}
 
 	if (!validateIndex(pTensor, index, sizeof(nv_bfloat16)))
@@ -475,16 +481,19 @@ bool lyTensorSetItemFromFloat32(lyTensor* pTensor, int32_t index, float value)
 		return false;
 	}
 
+	cudaDeviceSynchronize();
 	setItemFromFloat32Kernel<<<1, 1>>>(pTensor->data, index, value);
+
+	lyTensorMoveToCPU(pTensor);
+
 	return cudaGetLastError() == cudaSuccess;
 }
 
-bool lyTensorGetComplexItem(float* pReal, float* pImag, const lyTensor* pTensor, int32_t row, int32_t col)
+bool lyTensorGetComplexItem(float* pReal, float* pImag, lyTensor* pTensor, int32_t row, int32_t col)
 {
 	if (pTensor->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTensor);
 	}
 
 	if (!pReal || !pImag || !validateComplexAccess(pTensor, row, col))
@@ -500,6 +509,7 @@ bool lyTensorGetComplexItem(float* pReal, float* pImag, const lyTensor* pTensor,
 		return false;
 	}
 
+	cudaDeviceSynchronize();
 	getComplexItemKernel<<<1, 1>>>(temp, pTensor->data, baseIdx);
 
 	nv_bfloat16 hostValues[2];
@@ -512,6 +522,9 @@ bool lyTensorGetComplexItem(float* pReal, float* pImag, const lyTensor* pTensor,
 	cudaFree(temp);
 	*pReal = __bfloat162float(hostValues[0]);
 	*pImag = __bfloat162float(hostValues[1]);
+
+	lyTensorMoveToCPU(pTensor);
+
 	return true;
 }
 
@@ -519,8 +532,7 @@ bool lyTensorSetComplexItem(lyTensor* pTensor, int32_t row, int32_t col, float r
 {
 	if (pTensor->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTensor);
 	}
 
 	if (!validateComplexAccess(pTensor, row, col))
@@ -529,11 +541,16 @@ bool lyTensorSetComplexItem(lyTensor* pTensor, int32_t row, int32_t col, float r
 	}
 
 	int32_t baseIdx = row * pTensor->shape[1] * 2 + col * 2;
+
+	cudaDeviceSynchronize();
 	setComplexItemKernel<<<1, 1>>>(pTensor->data, baseIdx, real, imag);
+
+	lyTensorMoveToCPU(pTensor);
+
 	return cudaGetLastError() == cudaSuccess;
 }
 
-void lyTensorPrint(const lyTensor* pTensor)
+void lyTensorPrint(lyTensor* pTensor)
 {
 	if (!pTensor || !pTensor->data)
 	{
@@ -616,88 +633,66 @@ void lyTensorPrint(const lyTensor* pTensor)
 	free(hostData);
 }
 
-bool lyTensorToGPU(lyTensor** ppGPUTensor, const lyTensor* pCPUTensor)
+bool lyTensorMoveToGPU(lyTensor* pTensor)
 {
-	if (!ppGPUTensor || !pCPUTensor || pCPUTensor->memoryType != LY_MEMORY_CPU)
+	cudaDeviceSynchronize();
+	if (!pTensor || pTensor->memoryType != LY_MEMORY_CPU || !pTensor->data)
 	{
 		return false;
 	}
 
-	lyTensor* pGPUTensor;
-	if (!lyCreateTensor(&pGPUTensor, LY_MEMORY_GPU))
+	//	if (!checkGpuMemory("tensor allocation", pTensor->dataSize))
+	//	{
+	//		printf("Not enough GPU memory for tensor allocation\n");
+	//		return false;
+	//	}
+
+	nv_bfloat16* gpuData = NULL;
+	cudaError_t	 error	 = cudaMalloc(&gpuData, pTensor->dataSize);
+	if (error != cudaSuccess)
 	{
 		return false;
 	}
 
-	if (!lySetTensorShape(pGPUTensor, pCPUTensor->shape, pCPUTensor->rank))
+	error = cudaMemcpy(gpuData, pTensor->data, pTensor->dataSize, cudaMemcpyHostToDevice);
+	if (error != cudaSuccess)
 	{
-		lyDestroyTensor(pGPUTensor);
+		cudaFree(gpuData);
 		return false;
 	}
 
-	if (pCPUTensor->name && !lySetTensorName(pGPUTensor, pCPUTensor->name))
-	{
-		lyDestroyTensor(pGPUTensor);
-		return false;
-	}
-
-	if (!lySetTensorData(pGPUTensor, pCPUTensor->data, pCPUTensor->dataSize))
-	{
-		lyDestroyTensor(pGPUTensor);
-		return false;
-	}
-
-	*ppGPUTensor = pGPUTensor;
+	free(pTensor->data);
+	pTensor->data		= gpuData;
+	pTensor->memoryType = LY_MEMORY_GPU;
+	cudaDeviceSynchronize();
 	return true;
 }
 
-bool lyTensorToCPU(lyTensor** ppCPUTensor, const lyTensor* pGPUTensor)
+bool lyTensorMoveToCPU(lyTensor* pTensor)
 {
-	if (!ppCPUTensor || !pGPUTensor || pGPUTensor->memoryType != LY_MEMORY_GPU)
+	cudaDeviceSynchronize();
+	if (!pTensor || pTensor->memoryType != LY_MEMORY_GPU || !pTensor->data)
 	{
 		return false;
 	}
 
-	if (!lyCreateTensor(&pCPUTensor, LY_MEMORY_CPU))
-	{
-		return false;
-	}
-
-	if (!lySetTensorShape(pCPUTensor, pGPUTensor->shape, pGPUTensor->rank))
-	{
-		lyDestroyTensor(pCPUTensor);
-		return false;
-	}
-
-	if (pGPUTensor->name && !lySetTensorName(pCPUTensor, pGPUTensor->name))
-	{
-		lyDestroyTensor(pCPUTensor);
-		return false;
-	}
-
-	nv_bfloat16* cpuData = (nv_bfloat16*)malloc(pGPUTensor->dataSize);
+	nv_bfloat16* cpuData = (nv_bfloat16*)malloc(pTensor->dataSize);
 	if (!cpuData)
 	{
-		lyDestroyTensor(pCPUTensor);
 		return false;
 	}
 
-	cudaError_t error = cudaMemcpy(cpuData, pGPUTensor->data, pGPUTensor->dataSize, cudaMemcpyDeviceToHost);
+	cudaError_t error = cudaMemcpy(cpuData, pTensor->data, pTensor->dataSize, cudaMemcpyDeviceToHost);
 	if (error != cudaSuccess)
 	{
 		free(cpuData);
-		lyDestroyTensor(pCPUTensor);
 		return false;
 	}
 
-	if (!lySetTensorData(pCPUTensor, cpuData, pGPUTensor->dataSize))
-	{
-		free(cpuData);
-		lyDestroyTensor(pCPUTensor);
-		return false;
-	}
+	cudaFree(pTensor->data);
+	pTensor->data		= cpuData;
+	pTensor->memoryType = LY_MEMORY_CPU;
 
-	free(cpuData);
-	*ppCPUTensor = pCPUTensor;
+	cudaDeviceSynchronize();
 	return true;
 }

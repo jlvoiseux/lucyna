@@ -35,7 +35,7 @@ bool logCallback(const char* format, ...)
 	return true;
 }
 
-static bool verifyPrepare(const lyTensor* pInputTensor, const lyTensor* pFreqsCis, const lyTensor* pMask)
+static bool verifyPrepare(lyTensor* pInputTensor, lyTensor* pFreqsCis, lyTensor* pMask)
 {
 	// Verify input tensor shape
 	TEST_ASSERT_EQUAL_INT32(2, pInputTensor->rank);
@@ -55,7 +55,7 @@ static bool verifyPrepare(const lyTensor* pInputTensor, const lyTensor* pFreqsCi
 	return true;
 }
 
-static bool verifyOutput(const lyTensor* pOutput)
+static bool verifyOutput(lyTensor* pOutput)
 {
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->rank);
 	TEST_ASSERT_EQUAL_INT32(1, pOutput->shape[0]);
@@ -76,7 +76,7 @@ void test_TransformerForward(void)
 
 	int32_t	  shape[] = {SEQ_LENGTH};
 	lyTensor* pTokens;
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTokens, LY_MEMORY_GPU));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTokens, LY_MEMORY_CPU));
 	TEST_ASSERT_TRUE(lySetTensorShape(pTokens, shape, 1));
 	TEST_ASSERT_TRUE(lySetTensorData(pTokens, NULL, SEQ_LENGTH * sizeof(nv_bfloat16)));
 

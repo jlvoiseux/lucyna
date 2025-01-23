@@ -99,7 +99,7 @@ bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t
 	int32_t cacheShape[] = {pModel->args.maxSequenceLength, pModel->args.nKVHeads, pModel->args.headDim};
 
 	lyTensor* pCacheK;
-	if (!lyCreateTensor(&pCacheK, LY_MEMORY_GPU))
+	if (!lyCreateTensor(&pCacheK, LY_MEMORY_CPU))
 	{
 		lyDestroyAttention(pAttention);
 		return false;
@@ -112,7 +112,7 @@ bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t
 	}
 
 	lyTensor* pCacheV;
-	if (!lyCreateTensor(&pCacheV, LY_MEMORY_GPU))
+	if (!lyCreateTensor(&pCacheV, LY_MEMORY_CPU))
 	{
 		lyDestroyTensor(pCacheK);
 		lyDestroyAttention(pAttention);
@@ -170,12 +170,11 @@ __global__ void repeatKVKernel(nv_bfloat16* output, const nv_bfloat16* input, in
 	output[idx] = input[srcIdx];
 }
 
-bool lyRepeatKV(lyTensor** ppOutput, const lyTensor* pInput, int32_t nRep)
+bool lyRepeatKV(lyTensor** ppOutput, lyTensor* pInput, int32_t nRep)
 {
 	if (pInput->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pInput);
 	}
 
 	if (!ppOutput || !pInput || nRep <= 0)
@@ -197,6 +196,10 @@ bool lyRepeatKV(lyTensor** ppOutput, const lyTensor* pInput, int32_t nRep)
 			return false;
 		}
 		*ppOutput = pOutput;
+
+		lyTensorMoveToCPU(pInput);
+		lyTensorMoveToCPU(pOutput);
+
 		return true;
 	}
 
@@ -229,6 +232,7 @@ bool lyRepeatKV(lyTensor** ppOutput, const lyTensor* pInput, int32_t nRep)
 	int32_t blockSize	  = 256;
 	int32_t numBlocks	  = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	repeatKVKernel<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, seqLen, nKVHeads, nRep, headDim);
 
 	cudaError_t error = cudaGetLastError();
@@ -237,6 +241,9 @@ bool lyRepeatKV(lyTensor** ppOutput, const lyTensor* pInput, int32_t nRep)
 		lyDestroyTensor(pOutput);
 		return false;
 	}
+
+	lyTensorMoveToCPU(pInput);
+	lyTensorMoveToCPU(pOutput);
 
 	*ppOutput = pOutput;
 	return true;
@@ -265,12 +272,16 @@ __global__ void updateKVCacheKernel(nv_bfloat16* cacheK, nv_bfloat16* cacheV, co
 	cacheV[destPos * nKVHeads * headDim + remainder] = v[idx];
 }
 
-bool lyUpdateKVCache(lyAttention* pAttention, const lyTensor* pK, const lyTensor* pV, int32_t startPos)
+bool lyUpdateKVCache(lyAttention* pAttention, lyTensor* pK, lyTensor* pV, int32_t startPos)
 {
-	if (pK->memoryType == LY_MEMORY_CPU || pV->memoryType == LY_MEMORY_CPU)
+	if (pK->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pK);
+	}
+
+	if (pV->memoryType == LY_MEMORY_CPU)
+	{
+		lyTensorMoveToGPU(pV);
 	}
 
 	if (!pAttention || !pK || !pV || startPos < 0)
@@ -290,6 +301,7 @@ bool lyUpdateKVCache(lyAttention* pAttention, const lyTensor* pK, const lyTensor
 	int32_t blockSize	  = 256;
 	int32_t numBlocks	  = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	updateKVCacheKernel<<<numBlocks, blockSize>>>(pAttention->cacheK->data, pAttention->cacheV->data, pK->data, pV->data, startPos, seqLen, pAttention->nKVHeads, pAttention->headDim, maxSeqLen);
 
 	cudaError_t error = cudaGetLastError();
@@ -298,10 +310,13 @@ bool lyUpdateKVCache(lyAttention* pAttention, const lyTensor* pK, const lyTensor
 		return false;
 	}
 
+	lyTensorMoveToCPU(pK);
+	lyTensorMoveToCPU(pV);
+
 	return true;
 }
 
-bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTensor* pInput, int32_t startPos, const lyTensor* pFreqsCis, const lyTensor* pMask)
+bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
 {
 	if (!ppOutput || !pAttention || !pInput || !pFreqsCis)
 	{

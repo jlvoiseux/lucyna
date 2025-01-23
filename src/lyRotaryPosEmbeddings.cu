@@ -113,6 +113,8 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 	// Compute frequencies
 	int freqsBlockSize = 256;
 	int freqsGridSize  = (dim / 2 + freqsBlockSize - 1) / freqsBlockSize;
+
+	cudaDeviceSynchronize();
 	computeFrequenciesKernel<<<freqsGridSize, freqsBlockSize>>>(freqs->data, dim, end, theta);
 
 	// Create output tensor
@@ -134,6 +136,8 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 	// Compute rotary embeddings
 	dim3 blockSize(256);
 	dim3 gridSize((dim / 2 + blockSize.x - 1) / blockSize.x, end);
+
+	cudaDeviceSynchronize();
 	computeRotaryKernel<<<gridSize, blockSize>>>(out->data, freqs->data, dim, end);
 
 	cudaError_t error = cudaGetLastError();
@@ -145,11 +149,14 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 	}
 
 	lyDestroyTensor(freqs);
+
+	lyTensorMoveToCPU(out);
+
 	*ppOut = out;
 	return true;
 }
 
-bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTensor* pXQ, const lyTensor* pXK, const lyTensor* pFreqsCis)
+bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pXQ, lyTensor* pXK, lyTensor* pFreqsCis)
 {
 	if (!ppXQOut || !ppXKOut || !pXQ || !pXK || !pFreqsCis)
 	{
@@ -178,6 +185,7 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTens
 	int blockSize = 256;
 	int gridSize  = (elementPairs + blockSize - 1) / blockSize;	 // Grid size based on pairs
 
+	cudaDeviceSynchronize();
 	applyRotaryEmbeddingKernel<<<gridSize, blockSize>>>(pXQOut->data,
 														pXKOut->data,
 														pXQ->data,
@@ -194,6 +202,9 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTens
 		lyDestroyTensor(pXKOut);
 		return false;
 	}
+
+	lyTensorMoveToCPU(pXQOut);
+	lyTensorMoveToCPU(pXKOut);
 
 	*ppXQOut = pXQOut;
 	*ppXKOut = pXKOut;

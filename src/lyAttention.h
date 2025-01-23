@@ -22,4 +22,4 @@ typedef struct lyAttention
 
 bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex);
 void lyDestroyAttention(lyAttention* pAttention);
-bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, const lyTensor* pInput, int32_t startPos, const lyTensor* pFreqsCis, const lyTensor* pMask);
+bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask);

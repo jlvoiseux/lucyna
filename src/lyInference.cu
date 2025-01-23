@@ -68,7 +68,7 @@ bool lyCreateInferenceTokens(lyTensor** ppTokens, const lyInference* pInference,
 
 	int32_t	  shape[] = {pInference->sequenceLength};
 	lyTensor* tokens;
-	if (!lyCreateTensor(&tokens, LY_MEMORY_GPU))
+	if (!lyCreateTensor(&tokens, LY_MEMORY_CPU))
 	{
 		return false;
 	}
@@ -100,7 +100,7 @@ bool lyCreateInferenceTokens(lyTensor** ppTokens, const lyInference* pInference,
 	return true;
 }
 
-bool lyGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, const lyTensor* pInputTokens, int32_t startPos)
+bool lyGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, lyTensor* pInputTokens, int32_t startPos)
 {
 	if (!pResult || !pInference || !pInputTokens || startPos < 0)
 	{

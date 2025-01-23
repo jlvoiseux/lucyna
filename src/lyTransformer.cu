@@ -112,7 +112,7 @@ void lyDestroyTransformer(lyTransformer* pTransformer)
 	free(pTransformer);
 }
 
-bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, const lyTensor* pTokens, int32_t startPos)
+bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos)
 {
 	if (!ppOutput || !pTransformer || !pTokens || startPos < 0)
 	{
@@ -137,7 +137,7 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, cons
 	if (seqLen > 1)
 	{
 		int32_t shape[] = {seqLen, seqLen};
-		if (!lyCreateTensor(&mask, LY_MEMORY_GPU))
+		if (!lyCreateTensor(&mask, LY_MEMORY_CPU))
 		{
 			lyDestroyTensor(freqsCis);
 			lyDestroyTensor(h);

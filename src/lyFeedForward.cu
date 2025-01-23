@@ -104,12 +104,11 @@ __global__ void siluActivationKernel(nv_bfloat16* output, const nv_bfloat16* inp
 	output[idx]			= __hmul(val, sigmoid);
 }
 
-bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, const lyTensor* pInput)
+bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, lyTensor* pInput)
 {
 	if (pInput->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pInput);
 	}
 
 	if (!ppOutput || !pFeedForward || !pInput)
@@ -126,6 +125,7 @@ bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward
 	int blockSize = 256;
 	int numBlocks = (gateResult->shape[0] * gateResult->shape[1] + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	siluActivationKernel<<<numBlocks, blockSize>>>(gateResult->data, gateResult->data, gateResult->shape[0] * gateResult->shape[1]);
 
 	cudaError_t error = cudaGetLastError();
@@ -158,6 +158,8 @@ bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward
 		lyDestroyTensor(elementwiseProduct);
 		return false;
 	}
+
+	lyTensorMoveToCPU(pInput);
 
 	lyDestroyTensor(elementwiseProduct);
 	return true;

@@ -4,7 +4,7 @@
 #include <math_constants.h>
 #include <stdio.h>
 
-static int lyTensorGetElementCount(const lyTensor* pTensor)
+static int lyTensorGetElementCount(lyTensor* pTensor)
 {
 	int count = 1;
 	for (int i = 0; i < pTensor->rank; i++)
@@ -237,12 +237,16 @@ __global__ void tensorTransposeKernel3(nv_bfloat16* output, const nv_bfloat16* i
 	output[output_idx] = input[idx];
 }
 
-bool lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
+bool lyTensorMatMul(lyTensor** ppOutput, lyTensor* pA, lyTensor* pB)
 {
-	if (pA->memoryType == LY_MEMORY_CPU || pB->memoryType == LY_MEMORY_CPU)
+	if (pA->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pA);
+	}
+
+	if (pB->memoryType == LY_MEMORY_CPU)
+	{
+		lyTensorMoveToGPU(pB);
 	}
 
 	if (!ppOutput || !pA || !pB || pA->rank < 2 || pB->rank < 2)
@@ -324,6 +328,7 @@ bool lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 	int32_t blockSize	  = 256;
 	int32_t gridSize	  = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	tensorMatMulKernel<<<gridSize, blockSize>>>(pOutput->data, pA->data, pB->data, dAStrides, dBStrides, dOutStrides, dAShape, dBShape, pA->rank, batchSize, m, n, k);
 
 	cudaFree(dAShape);
@@ -342,16 +347,24 @@ bool lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 		return false;
 	}
 
+	lyTensorMoveToCPU(pA);
+	lyTensorMoveToCPU(pB);
+	lyTensorMoveToCPU(pOutput);
+
 	*ppOutput = pOutput;
 	return true;
 }
 
-bool lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB, float alpha, float beta)
+bool lyTensorScaleAndAdd(lyTensor** ppOutput, lyTensor* pA, lyTensor* pB, float alpha, float beta)
 {
-	if (pA->memoryType == LY_MEMORY_CPU || pB->memoryType == LY_MEMORY_CPU)
+	if (pA->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pA);
+	}
+
+	if (pB->memoryType == LY_MEMORY_CPU)
+	{
+		lyTensorMoveToGPU(pB);
 	}
 
 	if (!ppOutput || !pA || !pB || !pA->data || !pB->data || pA->rank < 2 || pB->rank < 2)
@@ -399,6 +412,7 @@ bool lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor
 	int32_t blockSize = 256;
 	int32_t numBlocks = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	tensorScaleAndAddBroadcastKernel<<<numBlocks, blockSize>>>(pOutput->data, pA->data, pB->data, alpha, beta, dAShape, dBShape, pA->rank, pB->rank, totalElements);
 
 	cudaFree(dAShape);
@@ -411,16 +425,24 @@ bool lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor
 		return false;
 	}
 
+	lyTensorMoveToCPU(pA);
+	lyTensorMoveToCPU(pB);
+	lyTensorMoveToCPU(pOutput);
+
 	*ppOutput = pOutput;
 	return true;
 }
 
-bool lyTensorElementwiseMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
+bool lyTensorElementwiseMul(lyTensor** ppOutput, lyTensor* pA, lyTensor* pB)
 {
-	if (pA->memoryType == LY_MEMORY_CPU || pB->memoryType == LY_MEMORY_CPU)
+	if (pA->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pA);
+	}
+
+	if (pB->memoryType == LY_MEMORY_CPU)
+	{
+		lyTensorMoveToGPU(pB);
 	}
 
 	if (!ppOutput || !pA || !pB || !pA->data || !pB->data)
@@ -461,6 +483,7 @@ bool lyTensorElementwiseMul(lyTensor** ppOutput, const lyTensor* pA, const lyTen
 	int blockSize = 256;
 	int gridSize  = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	tensorElementwiseMulKernel<<<gridSize, blockSize>>>(pOutput->data, pA->data, pB->data, totalElements);
 
 	cudaError_t error = cudaGetLastError();
@@ -470,6 +493,10 @@ bool lyTensorElementwiseMul(lyTensor** ppOutput, const lyTensor* pA, const lyTen
 		return false;
 	}
 
+	lyTensorMoveToCPU(pA);
+	lyTensorMoveToCPU(pB);
+	lyTensorMoveToCPU(pOutput);
+
 	*ppOutput = pOutput;
 	return true;
 }
@@ -478,8 +505,7 @@ bool lyTensorMakeTriangularMask(lyTensor* pTensor)
 {
 	if (pTensor->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTensor);
 	}
 
 	if (!pTensor || !pTensor->data || pTensor->rank != 2)
@@ -493,6 +519,7 @@ bool lyTensorMakeTriangularMask(lyTensor* pTensor)
 	dim3 blockSize(16, 16);
 	dim3 gridSize((cols + blockSize.x - 1) / blockSize.x, (rows + blockSize.y - 1) / blockSize.y);
 
+	cudaDeviceSynchronize();
 	triangularMaskKernel<<<gridSize, blockSize>>>(pTensor->data, rows, cols);
 
 	cudaError_t error = cudaGetLastError();
@@ -501,15 +528,16 @@ bool lyTensorMakeTriangularMask(lyTensor* pTensor)
 		return false;
 	}
 
+	lyTensorMoveToCPU(pTensor);
+
 	return true;
 }
 
-bool lyTensorArgmax(lyTensor** ppOutput, const lyTensor* pInput, int32_t dim)
+bool lyTensorArgmax(lyTensor** ppOutput, lyTensor* pInput, int32_t dim)
 {
 	if (pInput->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pInput);
 	}
 
 	if (!ppOutput || !pInput || dim < 0 || dim >= pInput->rank)
@@ -553,6 +581,7 @@ bool lyTensorArgmax(lyTensor** ppOutput, const lyTensor* pInput, int32_t dim)
 	int32_t blockSize = 256;
 	int32_t numBlocks = (batchSize + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	tensorArgmaxKernel<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, batchSize, dimSize);
 
 	cudaError_t error = cudaGetLastError();
@@ -562,16 +591,23 @@ bool lyTensorArgmax(lyTensor** ppOutput, const lyTensor* pInput, int32_t dim)
 		return false;
 	}
 
+	lyTensorMoveToCPU(pInput);
+	lyTensorMoveToCPU(pOutput);
+
 	*ppOutput = pOutput;
 	return true;
 }
 
-bool lyTensorOuter(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
+bool lyTensorOuter(lyTensor** ppOutput, lyTensor* pA, lyTensor* pB)
 {
-	if (pA->memoryType == LY_MEMORY_CPU || pB->memoryType == LY_MEMORY_CPU)
+	if (pA->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pA);
+	}
+
+	if (pB->memoryType == LY_MEMORY_CPU)
+	{
+		lyTensorMoveToGPU(pB);
 	}
 
 	if (!ppOutput || !pA || !pB || !pA->data || !pB->data)
@@ -600,6 +636,7 @@ bool lyTensorOuter(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 	dim3 blockSize(16, 16);
 	dim3 gridSize((pB->shape[0] + blockSize.x - 1) / blockSize.x, (pA->shape[0] + blockSize.y - 1) / blockSize.y);
 
+	cudaDeviceSynchronize();
 	tensorOuterKernel<<<gridSize, blockSize>>>(pOutput->data, pA->data, pB->data, pA->shape[0], pB->shape[0]);
 
 	cudaError_t error = cudaGetLastError();
@@ -609,16 +646,24 @@ bool lyTensorOuter(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 		return false;
 	}
 
+	lyTensorMoveToCPU(pA);
+	lyTensorMoveToCPU(pB);
+	lyTensorMoveToCPU(pOutput);
+
 	*ppOutput = pOutput;
 	return true;
 }
 
-bool lyTensorEmbedding(lyTensor** ppOutput, const lyTensor* pTokens, const lyTensor* pEmbeddings)
+bool lyTensorEmbedding(lyTensor** ppOutput, lyTensor* pTokens, lyTensor* pEmbeddings)
 {
-	if (pTokens->memoryType == LY_MEMORY_CPU || pEmbeddings->memoryType == LY_MEMORY_CPU)
+	if (pTokens->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pTokens);
+	}
+
+	if (pEmbeddings->memoryType == LY_MEMORY_CPU)
+	{
+		lyTensorMoveToGPU(pEmbeddings);
 	}
 
 	if (!ppOutput || !pTokens || !pEmbeddings || pTokens->rank != 1 || pEmbeddings->rank != 2)
@@ -657,6 +702,7 @@ bool lyTensorEmbedding(lyTensor** ppOutput, const lyTensor* pTokens, const lyTen
 	dim3 grid(numBlocks);
 	dim3 block(blockSize);
 
+	cudaDeviceSynchronize();
 	tensorEmbeddingKernel<<<grid, block>>>(pOutput->data, pTokens->data, pEmbeddings->data, seqLen, dim);
 
 	cudaError_t error = cudaGetLastError();
@@ -667,16 +713,19 @@ bool lyTensorEmbedding(lyTensor** ppOutput, const lyTensor* pTokens, const lyTen
 		return false;
 	}
 
+	lyTensorMoveToCPU(pTokens);
+	lyTensorMoveToCPU(pEmbeddings);
+	lyTensorMoveToCPU(pOutput);
+
 	*ppOutput = pOutput;
 	return true;
 }
 
-bool lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_t* pPerm)
+bool lyTensorTranspose(lyTensor** ppOutput, lyTensor* pInput, int32_t* pPerm)
 {
 	if (pInput->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pInput);
 	}
 
 	if (!ppOutput || !pInput || !pPerm || pInput->rank < 2)
@@ -742,6 +791,7 @@ bool lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_
 	int32_t blockSize = 256;
 	int32_t numBlocks = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	if (pInput->rank == 2)
 	{
 		tensorTransposeKernel2<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, d_dims, d_perm, pInput->rank, totalElements);
@@ -762,6 +812,9 @@ bool lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_
 		lyDestroyTensor(pOutput);
 		return false;
 	}
+
+	lyTensorMoveToCPU(pInput);
+	lyTensorMoveToCPU(pOutput);
 
 	*ppOutput = pOutput;
 	return true;

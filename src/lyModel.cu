@@ -34,7 +34,7 @@ bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* na
 		return false;
 	}
 
-	const lyTensor* pModelTensor = NULL;
+	lyTensor* pModelTensor = NULL;
 	for (int32_t i = 0; i < pModel->tensorCount; i++)
 	{
 		if (strcmp(pModel->tensors[i].name, name) == 0)
@@ -50,7 +50,7 @@ bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* na
 	}
 
 	lyTensor* pGpuTensor;
-	if (!lyCreateTensor(&pGpuTensor, LY_MEMORY_GPU))
+	if (!lyCreateTensor(&pGpuTensor, LY_MEMORY_CPU))
 	{
 		return false;
 	}

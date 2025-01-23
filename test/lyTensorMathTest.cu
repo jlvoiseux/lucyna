@@ -7,8 +7,8 @@ static lyTensor* pTensorB = NULL;
 
 void setUp(void)
 {
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorA, LY_MEMORY_GPU));
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorB, LY_MEMORY_GPU));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorA, LY_MEMORY_CPU));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorB, LY_MEMORY_CPU));
 }
 
 void tearDown(void)
@@ -56,14 +56,11 @@ void test_TensorScaleAndAdd2D(void)
 	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, alpha, beta));
 	cudaDeviceSynchronize();
 
-	nv_bfloat16 result[6];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
 	// Expected: 2*A - B
 	float expected[] = {1.5f, 3.0f, 4.5f, 6.0f, 7.5f, 9.0f};
 	for (int i = 0; i < 6; i++)
 	{
-		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(result[i]));
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
 	lyDestroyTensor(pOutput);
@@ -96,19 +93,15 @@ void test_TensorScaleAndAdd3D(void)
 	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, alpha, beta));
 	cudaDeviceSynchronize();
 
-	nv_bfloat16* result = (nv_bfloat16*)malloc(elements * sizeof(nv_bfloat16));
-	cudaMemcpy(result, pOutput->data, elements * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
-
 	for (size_t i = 0; i < elements; i++)
 	{
 		float expected = 0.5f * (float)(i + 1) + 2.0f * ((float)(i + 1) * 0.1f);
-		float actual   = __bfloat162float(result[i]);
+		float actual   = __bfloat162float(pOutput->data[i]);
 		TEST_ASSERT_FLOAT_WITHIN(0.05f, expected, actual);
 	}
 
 	free(dataA);
 	free(dataB);
-	free(result);
 	lyDestroyTensor(pOutput);
 }
 
@@ -172,17 +165,13 @@ void test_TensorScaleAndAddBroadcast(void)
 	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, alpha, beta));
 	cudaDeviceSynchronize();
 
-	nv_bfloat16* result = (nv_bfloat16*)malloc(24 * sizeof(nv_bfloat16));
-	cudaMemcpy(result, pOutput->data, 24 * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
-
 	// Verify first few elements
-	TEST_ASSERT_FLOAT_WITHIN(0.05f, 1.9f, __bfloat162float(result[0]));
-	TEST_ASSERT_FLOAT_WITHIN(0.05f, 3.8f, __bfloat162float(result[1]));
-	TEST_ASSERT_FLOAT_WITHIN(0.05f, 5.7f, __bfloat162float(result[2]));
+	TEST_ASSERT_FLOAT_WITHIN(0.05f, 1.9f, __bfloat162float(pOutput->data[0]));
+	TEST_ASSERT_FLOAT_WITHIN(0.05f, 3.8f, __bfloat162float(pOutput->data[1]));
+	TEST_ASSERT_FLOAT_WITHIN(0.05f, 5.7f, __bfloat162float(pOutput->data[2]));
 
 	free(dataA);
 	free(dataB);
-	free(result);
 	lyDestroyTensor(pOutput);
 }
 
@@ -217,13 +206,10 @@ void test_MatMul2D(void)
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[0]);
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[1]);
 
-	nv_bfloat16 result[4];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
 	float expected[] = {22.0f, 28.0f, 49.0f, 64.0f};
 	for (int i = 0; i < 4; i++)
 	{
-		TEST_ASSERT_FLOAT_WITHIN(0.1f, expected[i], __bfloat162float(result[i]));
+		TEST_ASSERT_FLOAT_WITHIN(0.1f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
 	lyDestroyTensor(pOutput);
@@ -342,13 +328,10 @@ void test_TensorElementwiseMul(void)
 	TEST_ASSERT_TRUE(lyTensorElementwiseMul(&pOutput, pTensorA, pTensorB));
 	cudaDeviceSynchronize();
 
-	nv_bfloat16 result[4];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
 	for (int i = 0; i < 4; i++)
 	{
 		float expected = (float)i * 2.0f;
-		float actual   = __bfloat162float(result[i]);
+		float actual   = __bfloat162float(pOutput->data[i]);
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
 	}
 
@@ -364,15 +347,12 @@ void test_TensorMakeTriangularMask(void)
 	TEST_ASSERT_TRUE(lyTensorMakeTriangularMask(pTensorA));
 	cudaDeviceSynchronize();
 
-	nv_bfloat16 result[9];
-	cudaMemcpy(result, pTensorA->data, sizeof(result), cudaMemcpyDeviceToHost);
-
 	for (int i = 0; i < 3; i++)
 	{
 		for (int j = 0; j < 3; j++)
 		{
 			float expected = j <= i ? 0.0f : -INFINITY;
-			float actual   = __bfloat162float(result[i * 3 + j]);
+			float actual   = __bfloat162float(pTensorA->data[i * 3 + j]);
 			if (expected == -INFINITY)
 			{
 				TEST_ASSERT_EQUAL_FLOAT(expected, actual);
@@ -400,12 +380,10 @@ void test_TensorArgmax(void)
 
 	TEST_ASSERT_EQUAL_INT32(1, pOutput->rank);
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[0]);
+	;
 
-	nv_bfloat16 result[2];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
-	TEST_ASSERT_EQUAL_INT32(1, (int32_t)__bfloat162float(result[0]));  // max at index 1 in first row
-	TEST_ASSERT_EQUAL_INT32(1, (int32_t)__bfloat162float(result[1]));  // max at index 1 in second row
+	TEST_ASSERT_EQUAL_INT32(1, (int32_t)__bfloat162float(pOutput->data[0]));  // max at index 1 in first row
+	TEST_ASSERT_EQUAL_INT32(1, (int32_t)__bfloat162float(pOutput->data[1]));  // max at index 1 in second row
 
 	lyDestroyTensor(pOutput);
 }
@@ -432,13 +410,10 @@ void test_TensorOuter(void)
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[0]);
 	TEST_ASSERT_EQUAL_INT32(3, pOutput->shape[1]);
 
-	nv_bfloat16 result[6];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
 	float expected[6] = {3.0f, 4.0f, 5.0f, 6.0f, 8.0f, 10.0f};
 	for (int i = 0; i < 6; i++)
 	{
-		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(result[i]));
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
 	lyDestroyTensor(pOutput);
@@ -485,10 +460,6 @@ void test_TensorEmbedding(void)
 	TEST_ASSERT_EQUAL_INT32(3, pOutput->shape[0]);	// sequence length
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[1]);	// embedding dimension
 
-	// Check output values
-	nv_bfloat16 result[6];
-	cudaMemcpy(result, pOutput->data, sizeof(result), cudaMemcpyDeviceToHost);
-
 	// Expected sequence:
 	// Token 1 -> [1.0, 1.1]
 	// Token 0 -> [0.0, 0.1]
@@ -496,7 +467,7 @@ void test_TensorEmbedding(void)
 	float expected[6] = {1.0f, 1.1f, 0.0f, 0.1f, 2.0f, 2.1f};
 	for (int i = 0; i < 6; i++)
 	{
-		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(result[i]));
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
 	lyDestroyTensor(pOutput);
@@ -524,9 +495,6 @@ void test_TensorTranspose(void)
 	TEST_ASSERT_EQUAL_INT32(3, pOutput->shape[0]);
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[1]);
 
-	nv_bfloat16 result[6];
-	cudaMemcpy(result, pOutput->data, 6 * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
-
 	// Expected after transpose:
 	// 0 3
 	// 1 4
@@ -534,7 +502,7 @@ void test_TensorTranspose(void)
 	float expected[] = {0.0f, 3.0f, 1.0f, 4.0f, 2.0f, 5.0f};
 	for (int i = 0; i < 6; i++)
 	{
-		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(result[i]));
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
 	lyDestroyTensor(pOutput);
@@ -562,14 +530,10 @@ void test_TensorTranspose3D(void)
 	TEST_ASSERT_EQUAL_INT32(4, pOutput->shape[1]);
 	TEST_ASSERT_EQUAL_INT32(3, pOutput->shape[2]);
 
-	nv_bfloat16* result = (nv_bfloat16*)malloc(24 * sizeof(nv_bfloat16));
-	cudaMemcpy(result, pOutput->data, 24 * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
+	TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, __bfloat162float(pOutput->data[0]));
+	TEST_ASSERT_FLOAT_WITHIN(0.01f, 4.0f, __bfloat162float(pOutput->data[1]));
+	TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f, __bfloat162float(pOutput->data[2]));
 
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, __bfloat162float(result[0]));
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 4.0f, __bfloat162float(result[1]));
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f, __bfloat162float(result[2]));
-
-	free(result);
 	lyDestroyTensor(pOutput);
 }
 
@@ -611,9 +575,6 @@ void test_TensorTransposeLarge(void)
 	TEST_ASSERT_EQUAL_INT32(headDim, pOutput->shape[1]);
 	TEST_ASSERT_EQUAL_INT32(nKVHeads, pOutput->shape[2]);
 
-	nv_bfloat16* result = (nv_bfloat16*)malloc(totalElements * sizeof(nv_bfloat16));
-	cudaMemcpy(result, pOutput->data, totalElements * sizeof(nv_bfloat16), cudaMemcpyDeviceToHost);
-
 	// Validate specific positions where we know the expected values
 	int32_t testPositions[][3] = {
 		{0, 0, 0},	// Should be same value
@@ -632,11 +593,10 @@ void test_TensorTransposeLarge(void)
 		size_t transposedIdx = x * (headDim * nKVHeads) + y * nKVHeads + z;
 
 		float originalVal	= __bfloat162float(data[originalIdx]);
-		float transposedVal = __bfloat162float(result[transposedIdx]);
+		float transposedVal = __bfloat162float(pOutput->data[transposedIdx]);
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, originalVal, transposedVal);
 	}
 
-	free(result);
 	lyDestroyTensor(pOutput);
 }
 

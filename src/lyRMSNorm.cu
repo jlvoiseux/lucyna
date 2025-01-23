@@ -61,12 +61,11 @@ __global__ void computeRMSNormKernel(nv_bfloat16* output, const nv_bfloat16* inp
 	output[idx]	 = __float2bfloat16(val * scale * weight);
 }
 
-bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, const lyTensor* pInput)
+bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pInput)
 {
 	if (pInput->memoryType == LY_MEMORY_CPU)
 	{
-		printf("CUDA operations on CPU tensors are not supported");
-		return false;
+		lyTensorMoveToGPU(pInput);
 	}
 
 	if (!ppOutput || !pNorm || !pInput || !pInput->data || !pNorm->weights || !pInput->rank)
@@ -93,6 +92,7 @@ bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, const lyTenso
 	int blockSize = 256;
 	int numBlocks = (totalElements + blockSize - 1) / blockSize;
 
+	cudaDeviceSynchronize();
 	computeRMSNormKernel<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, pNorm->weights->data, pNorm->epsilon, seqLen, dim);
 
 	cudaError_t error = cudaGetLastError();
@@ -101,6 +101,9 @@ bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, const lyTenso
 		lyDestroyTensor(pOutput);
 		return false;
 	}
+
+	lyTensorMoveToCPU(pInput);
+	lyTensorMoveToCPU(pOutput);
 
 	*ppOutput = pOutput;
 	return true;

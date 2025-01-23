@@ -91,7 +91,7 @@ void lyDestroyTransformerBlock(lyTransformerBlock* pBlock)
 	free(pBlock);
 }
 
-bool lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, const lyTensor* pInput, int32_t startPos, const lyTensor* pFreqsCis, const lyTensor* pMask)
+bool lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
 {
 	if (!ppOutput || !pBlock || !pInput || !pFreqsCis)
 	{

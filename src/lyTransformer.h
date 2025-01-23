@@ -21,4 +21,4 @@ typedef struct lyTransformer
 bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel);
 void lyDestroyTransformer(lyTransformer* pTransformer);
 
-bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, const lyTensor* pTokens, int32_t startPos);
+bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos);

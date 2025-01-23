@@ -32,7 +32,7 @@ void test_AttentionForward(void)
 {
 	int32_t	  inputShape[] = {4, pModel->args.dim};
 	lyTensor* pInput;
-	TEST_ASSERT_TRUE(lyCreateTensor(&pInput, LY_MEMORY_GPU));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pInput, LY_MEMORY_CPU));
 	TEST_ASSERT_TRUE(lySetTensorShape(pInput, inputShape, 2));
 	TEST_ASSERT_TRUE(lySetTensorData(pInput, NULL, 4 * pModel->args.dim * sizeof(nv_bfloat16)));
 
@@ -50,7 +50,7 @@ void test_AttentionForward(void)
 
 	int32_t	  maskShape[] = {4, 4};
 	lyTensor* pMask;
-	TEST_ASSERT_TRUE(lyCreateTensor(&pMask, LY_MEMORY_GPU));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pMask, LY_MEMORY_CPU));
 	TEST_ASSERT_TRUE(lySetTensorShape(pMask, maskShape, 2));
 	TEST_ASSERT_TRUE(lySetTensorData(pMask, NULL, 16 * sizeof(nv_bfloat16)));
 	TEST_ASSERT_TRUE(lyTensorMakeTriangularMask(pMask));
