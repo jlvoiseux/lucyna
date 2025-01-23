@@ -16,9 +16,11 @@ typedef struct lyTensor
 	int32_t		 rank;
 	nv_bfloat16* data;
 	size_t		 dataSize;
+	lyMemoryType memoryType;
 } lyTensor;
 
-bool lyCreateTensor(lyTensor** ppTensor);
+bool lyCreateTensor(lyTensor** ppTensor, lyMemoryType memoryType);
+void lyFreeTensorData(lyTensor* pTensor);
 void lyDestroyTensor(lyTensor* pTensor);
 
 bool lySetTensorShape(lyTensor* pTensor, const int32_t* pShape, int32_t rank);
@@ -34,5 +36,8 @@ bool lyTensorGetItemAsFloat32(float* pOut, const lyTensor* pTensor, int32_t inde
 bool lyTensorSetItemFromFloat32(lyTensor* pTensor, int32_t index, float value);
 bool lyTensorGetComplexItem(float* pReal, float* pImag, const lyTensor* pTensor, int32_t row, int32_t col);
 bool lyTensorSetComplexItem(lyTensor* pTensor, int32_t row, int32_t col, float real, float imag);
+
+bool lyTensorToGPU(lyTensor** ppGPUTensor, const lyTensor* pCPUTensor);
+bool lyTensorToCPU(lyTensor** ppCPUTensor, const lyTensor* pGPUTensor);
 
 void lyTensorPrint(const lyTensor* pTensor);

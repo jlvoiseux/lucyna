@@ -68,11 +68,11 @@ bool lyCreateInferenceTokens(lyTensor** ppTokens, const lyInference* pInference,
 
 	int32_t	  shape[] = {pInference->sequenceLength};
 	lyTensor* tokens;
-	if (!lyCreateTensor(&tokens))
+	if (!lyCreateTensor(&tokens, LY_MEMORY_GPU))
 	{
 		return false;
 	}
-	if (!lySetTensorShape(tokens, shape, 1) || !lySetTensorData(tokens, NULL, tokenCount * sizeof(nv_bfloat16)))
+	if (!lySetTensorShape(tokens, shape, 1) || !lySetTensorData(tokens, NULL, pInference->sequenceLength * sizeof(nv_bfloat16)))
 	{
 		lyDestroyTensor(tokens);
 		return false;

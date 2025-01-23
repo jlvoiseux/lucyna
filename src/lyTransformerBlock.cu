@@ -30,9 +30,11 @@ bool lyCreateTransformerBlock(lyTransformerBlock** ppBlock, const lyModel* pMode
 
 	if (!lyCreateRMSNorm(&pBlock->attnNorm, pModel->args.normEps, attnNormWeights))
 	{
+		lyDestroyTensor(attnNormWeights);
 		free(pBlock);
 		return false;
 	}
+	lyDestroyTensor(attnNormWeights);
 
 	if (!lyCreateAttention(&pBlock->attention, pModel, layerIndex))
 	{
@@ -54,11 +56,13 @@ bool lyCreateTransformerBlock(lyTransformerBlock** ppBlock, const lyModel* pMode
 
 	if (!lyCreateRMSNorm(&pBlock->ffnNorm, pModel->args.normEps, ffnNormWeights))
 	{
+		lyDestroyTensor(ffnNormWeights);
 		lyDestroyAttention(pBlock->attention);
 		lyDestroyRMSNorm(pBlock->attnNorm);
 		free(pBlock);
 		return false;
 	}
+	lyDestroyTensor(ffnNormWeights);
 
 	if (!lyCreateFeedForward(&pBlock->feedForward, pModel, layerIndex))
 	{

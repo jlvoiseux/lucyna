@@ -3,6 +3,7 @@
 #include "lyTensor.h"
 #include "lyTensorMath.h"
 #include "lyTransformer.h"
+#include "lyUtil.h"
 #include "unity.h"
 
 #define M_PI 3.14159265358979323846f
@@ -11,6 +12,8 @@ static lyModel* pModel = NULL;
 
 void setUp(void)
 {
+	printDeviceInfo();
+	cudaSetDevice(0);
 	lyLoadModel(&pModel, "../model-tuned", true, true);
 }
 
@@ -73,7 +76,7 @@ void test_TransformerForward(void)
 
 	int32_t	  shape[] = {SEQ_LENGTH};
 	lyTensor* pTokens;
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTokens));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTokens, LY_MEMORY_GPU));
 	TEST_ASSERT_TRUE(lySetTensorShape(pTokens, shape, 1));
 	TEST_ASSERT_TRUE(lySetTensorData(pTokens, NULL, SEQ_LENGTH * sizeof(nv_bfloat16)));
 

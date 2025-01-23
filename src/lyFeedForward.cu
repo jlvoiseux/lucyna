@@ -34,40 +34,49 @@ bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, i
 	int32_t perm[] = {1, 0};
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w1.weight", layerIndex);
-	if (!lyGetModelTensor(&pFeedForward->ffnGate, pModel, tensorName))
+	lyTensor* tempGate;
+	if (!lyGetModelTensor(&tempGate, pModel, tensorName))
 	{
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
-	if (!lyTensorTranspose(&pFeedForward->ffnGate, pFeedForward->ffnGate, perm))
+	if (!lyTensorTranspose(&pFeedForward->ffnGate, tempGate, perm))
 	{
+		lyDestroyTensor(tempGate);
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
+	lyDestroyTensor(tempGate);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w2.weight", layerIndex);
-	if (!lyGetModelTensor(&pFeedForward->ffnDown, pModel, tensorName))
+	lyTensor* tempDown;
+	if (!lyGetModelTensor(&tempDown, pModel, tensorName))
 	{
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
-	if (!lyTensorTranspose(&pFeedForward->ffnDown, pFeedForward->ffnDown, perm))
+	if (!lyTensorTranspose(&pFeedForward->ffnDown, tempDown, perm))
 	{
+		lyDestroyTensor(tempDown);
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
+	lyDestroyTensor(tempDown);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w3.weight", layerIndex);
-	if (!lyGetModelTensor(&pFeedForward->ffnUp, pModel, tensorName))
+	lyTensor* tempUp;
+	if (!lyGetModelTensor(&tempUp, pModel, tensorName))
 	{
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
-	if (!lyTensorTranspose(&pFeedForward->ffnUp, pFeedForward->ffnUp, perm))
+	if (!lyTensorTranspose(&pFeedForward->ffnUp, tempUp, perm))
 	{
+		lyDestroyTensor(tempUp);
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
+	lyDestroyTensor(tempUp);
 
 	*ppFeedForward = pFeedForward;
 	return true;
@@ -97,6 +106,12 @@ __global__ void siluActivationKernel(nv_bfloat16* output, const nv_bfloat16* inp
 
 bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, const lyTensor* pInput)
 {
+	if (pInput->memoryType == LY_MEMORY_CPU)
+	{
+		printf("CUDA operations on CPU tensors are not supported");
+		return false;
+	}
+
 	if (!ppOutput || !pFeedForward || !pInput)
 	{
 		return false;

@@ -7,8 +7,8 @@ static lyTensor* pTensorB = NULL;
 
 void setUp(void)
 {
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorA));
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorB));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorA, LY_MEMORY_GPU));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTensorB, LY_MEMORY_GPU));
 }
 
 void tearDown(void)

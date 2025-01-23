@@ -34,14 +34,45 @@ bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* na
 		return false;
 	}
 
+	const lyTensor* pModelTensor = NULL;
 	for (int32_t i = 0; i < pModel->tensorCount; i++)
 	{
 		if (strcmp(pModel->tensors[i].name, name) == 0)
 		{
-			*ppTensor = &pModel->tensors[i];
-			return true;
+			pModelTensor = &pModel->tensors[i];
+			break;
 		}
 	}
 
-	return false;
+	if (!pModelTensor)
+	{
+		return false;
+	}
+
+	lyTensor* pGpuTensor;
+	if (!lyCreateTensor(&pGpuTensor, LY_MEMORY_GPU))
+	{
+		return false;
+	}
+
+	if (!lySetTensorShape(pGpuTensor, pModelTensor->shape, pModelTensor->rank))
+	{
+		lyDestroyTensor(pGpuTensor);
+		return false;
+	}
+
+	if (!lySetTensorName(pGpuTensor, pModelTensor->name))
+	{
+		lyDestroyTensor(pGpuTensor);
+		return false;
+	}
+
+	if (!lySetTensorData(pGpuTensor, pModelTensor->data, pModelTensor->dataSize))
+	{
+		lyDestroyTensor(pGpuTensor);
+		return false;
+	}
+
+	*ppTensor = pGpuTensor;
+	return true;
 }

@@ -307,14 +307,7 @@ bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, b
 			return false;
 		}
 
-		if (cudaFree(srcTensor->data) != cudaSuccess)
-		{
-			lyDestroyDict(tensors);
-			lyDestroyPickleReader(pReader);
-			lyCloseZip(pZip);
-			lyDestroyModel(pModel);
-			return false;
-		}
+		free(srcTensor->data);
 	}
 
 	lyDestroyDict(tensors);
@@ -375,7 +368,7 @@ void lyDestroyModel(lyModel* pModel)
 	{
 		for (int32_t i = 0; i < pModel->tensorCount; i++)
 		{
-			lyDestroyTensor(&pModel->tensors[i]);
+			lyFreeTensorData(&pModel->tensors[i]);	// Allocated contiguously
 		}
 		free(pModel->tensors);
 	}

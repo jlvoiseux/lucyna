@@ -1,6 +1,7 @@
 #include "lyRMSNorm.h"
 
 #include <cuda_bf16.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 bool lyCreateRMSNorm(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights)
@@ -62,13 +63,19 @@ __global__ void computeRMSNormKernel(nv_bfloat16* output, const nv_bfloat16* inp
 
 bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, const lyTensor* pInput)
 {
+	if (pInput->memoryType == LY_MEMORY_CPU)
+	{
+		printf("CUDA operations on CPU tensors are not supported");
+		return false;
+	}
+
 	if (!ppOutput || !pNorm || !pInput || !pInput->data || !pNorm->weights || !pInput->rank)
 	{
 		return false;
 	}
 
 	lyTensor* pOutput;
-	if (!lyCreateTensor(&pOutput))
+	if (!lyCreateTensor(&pOutput, LY_MEMORY_GPU))
 	{
 		return false;
 	}

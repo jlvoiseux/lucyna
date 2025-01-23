@@ -109,7 +109,7 @@ bool lyRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount)
 	lyStack* shapeArray = (lyStack*)shapeArrayPtr;
 
 	lyTensor* pTensor;
-	if (!lyCreateTensor(&pTensor))
+	if (!lyCreateTensor(&pTensor, LY_MEMORY_CPU))
 	{
 		return false;
 	}

@@ -10,7 +10,7 @@ static lyTensor* pTensor = NULL;
 
 void setUp(void)
 {
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTensor));
+	TEST_ASSERT_TRUE(lyCreateTensor(&pTensor, LY_MEMORY_GPU));
 }
 
 void tearDown(void)

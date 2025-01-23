@@ -100,7 +100,7 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 
 	// Create frequencies tensor
 	lyTensor* freqs;
-	if (!lyCreateTensor(&freqs))
+	if (!lyCreateTensor(&freqs, LY_MEMORY_GPU))
 		return false;
 
 	int32_t freqsShape[] = {dim / 2};
@@ -117,7 +117,7 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 
 	// Create output tensor
 	lyTensor* out;
-	if (!lyCreateTensor(&out))
+	if (!lyCreateTensor(&out, LY_MEMORY_GPU))
 	{
 		lyDestroyTensor(freqs);
 		return false;
@@ -157,7 +157,7 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, const lyTens
 	}
 
 	lyTensor *pXQOut, *pXKOut;
-	if (!lyCreateTensor(&pXQOut) || !lyCreateTensor(&pXKOut))
+	if (!lyCreateTensor(&pXQOut, LY_MEMORY_GPU) || !lyCreateTensor(&pXKOut, LY_MEMORY_GPU))
 	{
 		return false;
 	}

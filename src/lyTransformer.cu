@@ -55,19 +55,27 @@ bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
 	}
 	if (!lyCreateRMSNorm(&pTransformer->norm, pModel->args.normEps, normWeights))
 	{
+		lyDestroyTensor(normWeights);
 		lyDestroyTransformer(pTransformer);
 		return false;
 	}
+	lyDestroyTensor(normWeights);
 
 	int32_t	  perm[] = {1, 0};
 	lyTensor* output;
-	if (!lyGetModelTensor(&output, pModel, "output.weight") || !lySetTensorShape(output, embeddingsShape, 2))
+	lyTensor* tempOutput;
+	if (!lyGetModelTensor(&tempOutput, pModel, "output.weight") || !lySetTensorShape(tempOutput, embeddingsShape, 2))
 	{
 		lyDestroyTransformer(pTransformer);
 		return false;
 	}
-	if (!lyTensorTranspose(&output, output, perm))
-		;
+	if (!lyTensorTranspose(&output, tempOutput, perm))
+	{
+		lyDestroyTensor(tempOutput);
+		lyDestroyTransformer(pTransformer);
+		return false;
+	}
+	lyDestroyTensor(tempOutput);
 	pTransformer->output = output;
 
 	if (!precomputeFreqsCis(&pTransformer->freqsCis, pTransformer->dim / pModel->args.nHeads, pModel->args.maxSequenceLength * 2, pModel->args.ropeTheta))
@@ -129,7 +137,7 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, cons
 	if (seqLen > 1)
 	{
 		int32_t shape[] = {seqLen, seqLen};
-		if (!lyCreateTensor(&mask))
+		if (!lyCreateTensor(&mask, LY_MEMORY_GPU))
 		{
 			lyDestroyTensor(freqsCis);
 			lyDestroyTensor(h);
