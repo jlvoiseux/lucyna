@@ -68,15 +68,7 @@ bool lyCreateInferenceTokens(lyTensor** ppTokens, const lyInference* pInference,
 
 	int32_t	  shape[] = {pInference->sequenceLength};
 	lyTensor* tokens;
-	if (!lyCreateTensor(&tokens, LY_MEMORY_CPU))
-	{
-		return false;
-	}
-	if (!lySetTensorShape(tokens, shape, 1) || !lySetTensorData(tokens, NULL, pInference->sequenceLength * sizeof(nv_bfloat16)))
-	{
-		lyDestroyTensor(tokens);
-		return false;
-	}
+	lyCreateTensor(&tokens, shape, 1, NULL, NULL);
 
 	for (int32_t i = 0; i < pInference->sequenceLength; i++)
 	{
@@ -114,11 +106,7 @@ bool lyGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInferenc
 	}
 
 	lyTensor* lastLogits;
-	if (!lyTensorSlice(&lastLogits, logits, logits->shape[0] - 1, logits->shape[0]))
-	{
-		lyDestroyTensor(logits);
-		return false;
-	}
+	lyTensorSlice(&lastLogits, logits, logits->shape[0] - 1, logits->shape[0]);
 	lyDestroyTensor(logits);
 
 	lyTensor* maxToken;

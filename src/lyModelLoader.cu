@@ -274,7 +274,7 @@ bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, b
 	}
 
 	pModel->tensorCount = tensors->count;
-	pModel->tensors		= (lyTensor*)malloc(sizeof(lyTensor) * tensors->count);
+	pModel->tensors		= (lyTensor**)malloc(sizeof(lyTensor*) * tensors->count);
 	if (!pModel->tensors)
 	{
 		lyDestroyDict(tensors);
@@ -284,7 +284,7 @@ bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, b
 		return false;
 	}
 
-	memset(pModel->tensors, 0, sizeof(lyTensor) * tensors->count);
+	memset(pModel->tensors, 0, sizeof(lyTensor*) * tensors->count);
 
 	for (size_t i = 0; i < tensors->count; i++)
 	{
@@ -298,15 +298,7 @@ bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, b
 			return false;
 		}
 
-		if (!lySetTensorName(&pModel->tensors[i], tensors->keys[i]) || (srcTensor->rank > 0 && !lySetTensorShape(&pModel->tensors[i], srcTensor->shape, srcTensor->rank)) || !lySetTensorData(&pModel->tensors[i], srcTensor->data, srcTensor->dataSize))
-		{
-			lyDestroyDict(tensors);
-			lyDestroyPickleReader(pReader);
-			lyCloseZip(pZip);
-			lyDestroyModel(pModel);
-			return false;
-		}
-
+		lyCreateTensor(&pModel->tensors[i], srcTensor->shape, srcTensor->rank, srcTensor->data, tensors->keys[i]);
 		free(srcTensor->data);
 	}
 
@@ -368,9 +360,8 @@ void lyDestroyModel(lyModel* pModel)
 	{
 		for (int32_t i = 0; i < pModel->tensorCount; i++)
 		{
-			lyFreeTensorData(&pModel->tensors[i]);	// Allocated contiguously
+			lyDestroyTensor(pModel->tensors[i]);
 		}
-		free(pModel->tensors);
 	}
 
 	lyUnmapModelFile(&pModel->mapping);

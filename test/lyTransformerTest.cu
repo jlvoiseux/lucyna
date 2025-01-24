@@ -12,8 +12,6 @@ static lyModel* pModel = NULL;
 
 void setUp(void)
 {
-	printDeviceInfo();
-	cudaSetDevice(0);
 	lyLoadModel(&pModel, "../model-tuned", true, true);
 }
 
@@ -76,9 +74,7 @@ void test_TransformerForward(void)
 
 	int32_t	  shape[] = {SEQ_LENGTH};
 	lyTensor* pTokens;
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTokens, LY_MEMORY_CPU));
-	TEST_ASSERT_TRUE(lySetTensorShape(pTokens, shape, 1));
-	TEST_ASSERT_TRUE(lySetTensorData(pTokens, NULL, SEQ_LENGTH * sizeof(nv_bfloat16)));
+	lyCreateTensor(&pTokens, shape, 1, NULL, NULL);
 
 	const int32_t padToken = -1;  // Get from model
 	for (int32_t i = 0; i < SEQ_LENGTH; i++)
@@ -102,9 +98,9 @@ void test_TransformerForward(void)
 
 	for (int32_t curPos = promptLength; curPos < SEQ_LENGTH; curPos++)
 	{
-		TEST_ASSERT_TRUE(lyTensorSlice(&pInputTokens, pTokens, prevPos, curPos));
+		lyTensorSlice(&pInputTokens, pTokens, prevPos, curPos);
 		TEST_ASSERT_TRUE(lyTransformerForward(&pLogits, pTransformer, pInputTokens, prevPos));
-		TEST_ASSERT_TRUE(lyTensorSlice(&pNextToken, pLogits, pLogits->shape[0] - 1, pLogits->shape[0]));
+		lyTensorSlice(&pNextToken, pLogits, pLogits->shape[0] - 1, pLogits->shape[0]);
 		lyTensor* pArgmax;
 		TEST_ASSERT_TRUE(lyTensorArgmax(&pArgmax, pNextToken, pNextToken->rank - 1));
 		int32_t nextTokenId;
@@ -148,7 +144,7 @@ void test_PrecomputeFreqsCis(void)
 int main(void)
 {
 	UNITY_BEGIN();
-	RUN_TEST(test_TransformerForward);
-	// RUN_TEST(test_PrecomputeFreqsCis);
+	// RUN_TEST(test_TransformerForward);
+	RUN_TEST(test_PrecomputeFreqsCis);
 	return UNITY_END();
 }

@@ -39,7 +39,7 @@ typedef struct lyModelArgs
 typedef struct lyModel
 {
 	lyModelArgs	 args;
-	lyTensor*	 tensors;
+	lyTensor**	 tensors;
 	int32_t		 tensorCount;
 	lyMappedFile mapping;
 } lyModel;

@@ -34,7 +34,6 @@ bool lyCreateTransformerBlock(lyTransformerBlock** ppBlock, const lyModel* pMode
 		free(pBlock);
 		return false;
 	}
-	lyDestroyTensor(attnNormWeights);
 
 	if (!lyCreateAttention(&pBlock->attention, pModel, layerIndex))
 	{
@@ -62,7 +61,6 @@ bool lyCreateTransformerBlock(lyTransformerBlock** ppBlock, const lyModel* pMode
 		free(pBlock);
 		return false;
 	}
-	lyDestroyTensor(ffnNormWeights);
 
 	if (!lyCreateFeedForward(&pBlock->feedForward, pModel, layerIndex))
 	{

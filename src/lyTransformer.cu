@@ -23,8 +23,7 @@ bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
 	pTransformer->nLayers	= pModel->args.nLayers;
 
 	lyTensor* pEmbeddings;
-	int32_t	  embeddingsShape[] = {pTransformer->vocabSize, pTransformer->dim};
-	if (!lyGetModelTensor(&pEmbeddings, pModel, "tok_embeddings.weight") || !lySetTensorShape(pEmbeddings, embeddingsShape, 2) || !lySetTensorData(pEmbeddings, NULL, pTransformer->vocabSize * pTransformer->dim * sizeof(nv_bfloat16)))
+	if (!lyGetModelTensor(&pEmbeddings, pModel, "tok_embeddings.weight"))
 	{
 		lyDestroyTransformer(pTransformer);
 		return false;
@@ -59,12 +58,11 @@ bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
 		lyDestroyTransformer(pTransformer);
 		return false;
 	}
-	lyDestroyTensor(normWeights);
 
 	int32_t	  perm[] = {1, 0};
 	lyTensor* output;
 	lyTensor* tempOutput;
-	if (!lyGetModelTensor(&tempOutput, pModel, "output.weight") || !lySetTensorShape(tempOutput, embeddingsShape, 2))
+	if (!lyGetModelTensor(&tempOutput, pModel, "output.weight"))
 	{
 		lyDestroyTransformer(pTransformer);
 		return false;
@@ -75,7 +73,6 @@ bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
 		lyDestroyTransformer(pTransformer);
 		return false;
 	}
-	lyDestroyTensor(tempOutput);
 	pTransformer->output = output;
 
 	if (!precomputeFreqsCis(&pTransformer->freqsCis, pTransformer->dim / pModel->args.nHeads, pModel->args.maxSequenceLength * 2, pModel->args.ropeTheta))
@@ -127,29 +124,13 @@ bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTe
 
 	int32_t	  seqLen = pTokens->shape[0];
 	lyTensor* freqsCis;
-	if (!lyTensorSlice(&freqsCis, pTransformer->freqsCis, startPos, startPos + seqLen))
-	{
-		lyDestroyTensor(h);
-		return false;
-	}
+	lyTensorSlice(&freqsCis, pTransformer->freqsCis, startPos, startPos + seqLen);
 
 	lyTensor* mask = NULL;
 	if (seqLen > 1)
 	{
 		int32_t shape[] = {seqLen, seqLen};
-		if (!lyCreateTensor(&mask, LY_MEMORY_CPU))
-		{
-			lyDestroyTensor(freqsCis);
-			lyDestroyTensor(h);
-			return false;
-		}
-		if (!lySetTensorShape(mask, shape, 2) || !lySetTensorData(mask, NULL, seqLen * seqLen * sizeof(nv_bfloat16)) || !lyTensorMakeTriangularMask(mask))
-		{
-			lyDestroyTensor(mask);
-			lyDestroyTensor(freqsCis);
-			lyDestroyTensor(h);
-			return false;
-		}
+		lyCreateTensor(&mask, shape, 2, NULL, NULL);
 	}
 
 	lyTensor* currentTensor = h;

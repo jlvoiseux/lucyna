@@ -34,76 +34,38 @@ void lyDestroyRMSNorm(lyRMSNorm* pNorm)
 	free(pNorm);
 }
 
-__global__ void computeRMSNormKernel(nv_bfloat16* output, const nv_bfloat16* input, const nv_bfloat16* weights, float epsilon, int seqLen, int dim)
-{
-	int idx	   = blockIdx.x * blockDim.x + threadIdx.x;
-	int seqIdx = idx / dim;
-	int dimIdx = idx % dim;
-
-	if (seqIdx >= seqLen)
-		return;
-
-	// Compute sum of squares
-	float sumSquare = 0.0f;
-	for (int d = 0; d < dim; d++)
-	{
-		float val = __bfloat162float(input[seqIdx * dim + d]);
-		sumSquare += val * val;
-	}
-
-	// Compute normalization factor
-	float meanSquare = sumSquare / (float)dim;
-	float scale		 = 1.0f / sqrtf(meanSquare + epsilon);
-
-	// Apply normalization and weights
-	float val	 = __bfloat162float(input[idx]);
-	float weight = __bfloat162float(weights[dimIdx]);
-	output[idx]	 = __float2bfloat16(val * scale * weight);
-}
-
 bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pInput)
 {
-	if (pInput->memoryType == LY_MEMORY_CPU)
-	{
-		lyTensorMoveToGPU(pInput);
-	}
-
 	if (!ppOutput || !pNorm || !pInput || !pInput->data || !pNorm->weights || !pInput->rank)
 	{
 		return false;
 	}
 
 	lyTensor* pOutput;
-	if (!lyCreateTensor(&pOutput, LY_MEMORY_GPU))
+	lyCreateTensor(&pOutput, pInput->shape, pInput->rank, NULL, NULL);
+
+	int seqLen = pInput->shape[0];
+	int dim	   = pInput->shape[1];
+
+	for (int seqIdx = 0; seqIdx < seqLen; seqIdx++)
 	{
-		return false;
+		float sumSquare = 0.0f;
+		for (int dimIdx = 0; dimIdx < dim; dimIdx++)
+		{
+			float val = __bfloat162float(pInput->data[seqIdx * dim + dimIdx]);
+			sumSquare += val * val;
+		}
+
+		float meanSquare = sumSquare / (float)dim;
+		float scale		 = 1.0f / sqrtf(meanSquare + pNorm->epsilon);
+
+		for (int dimIdx = 0; dimIdx < dim; dimIdx++)
+		{
+			float val							 = __bfloat162float(pInput->data[seqIdx * dim + dimIdx]);
+			float weight						 = __bfloat162float(pNorm->weights->data[dimIdx]);
+			pOutput->data[seqIdx * dim + dimIdx] = __float2bfloat16(val * scale * weight);
+		}
 	}
-
-	int seqLen		  = pInput->shape[0];
-	int dim			  = pInput->shape[1];
-	int totalElements = seqLen * dim;
-
-	if (!lySetTensorShape(pOutput, pInput->shape, pInput->rank) || !lySetTensorData(pOutput, NULL, totalElements * sizeof(nv_bfloat16)))
-	{
-		lyDestroyTensor(pOutput);
-		return false;
-	}
-
-	int blockSize = 256;
-	int numBlocks = (totalElements + blockSize - 1) / blockSize;
-
-	cudaDeviceSynchronize();
-	computeRMSNormKernel<<<numBlocks, blockSize>>>(pOutput->data, pInput->data, pNorm->weights->data, pNorm->epsilon, seqLen, dim);
-
-	cudaError_t error = cudaGetLastError();
-	if (error != cudaSuccess)
-	{
-		lyDestroyTensor(pOutput);
-		return false;
-	}
-
-	lyTensorMoveToCPU(pInput);
-	lyTensorMoveToCPU(pOutput);
 
 	*ppOutput = pOutput;
 	return true;

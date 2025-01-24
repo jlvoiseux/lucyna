@@ -46,7 +46,6 @@ bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, i
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
-	lyDestroyTensor(tempGate);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w2.weight", layerIndex);
 	lyTensor* tempDown;
@@ -61,7 +60,6 @@ bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, i
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
-	lyDestroyTensor(tempDown);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.feed_forward.w3.weight", layerIndex);
 	lyTensor* tempUp;
@@ -76,7 +74,6 @@ bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, i
 		lyDestroyFeedForward(pFeedForward);
 		return false;
 	}
-	lyDestroyTensor(tempUp);
 
 	*ppFeedForward = pFeedForward;
 	return true;
@@ -92,25 +89,13 @@ void lyDestroyFeedForward(lyFeedForward* pFeedForward)
 	free(pFeedForward);
 }
 
-__global__ void siluActivationKernel(nv_bfloat16* output, const nv_bfloat16* input, int size)
+static float silu(float x)
 {
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx >= size)
-		return;
-
-	nv_bfloat16 val = input[idx];
-	// SiLU(x) = x * sigmoid(x)
-	nv_bfloat16 sigmoid = __hdiv(__float2bfloat16(1.0f), __hadd(__float2bfloat16(1.0f), hexp(__hneg(val))));
-	output[idx]			= __hmul(val, sigmoid);
+	return x / (1.0f + expf(-x));
 }
 
 bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, lyTensor* pInput)
 {
-	if (pInput->memoryType == LY_MEMORY_CPU)
-	{
-		lyTensorMoveToGPU(pInput);
-	}
-
 	if (!ppOutput || !pFeedForward || !pInput)
 	{
 		return false;
@@ -122,17 +107,11 @@ bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward
 		return false;
 	}
 
-	int blockSize = 256;
-	int numBlocks = (gateResult->shape[0] * gateResult->shape[1] + blockSize - 1) / blockSize;
-
-	cudaDeviceSynchronize();
-	siluActivationKernel<<<numBlocks, blockSize>>>(gateResult->data, gateResult->data, gateResult->shape[0] * gateResult->shape[1]);
-
-	cudaError_t error = cudaGetLastError();
-	if (error != cudaSuccess)
+	int totalElements = gateResult->shape[0] * gateResult->shape[1];
+	for (int i = 0; i < totalElements; i++)
 	{
-		lyDestroyTensor(gateResult);
-		return false;
+		float val			= __bfloat162float(gateResult->data[i]);
+		gateResult->data[i] = __float2bfloat16(silu(val));
 	}
 
 	lyTensor* upResult;
@@ -158,8 +137,6 @@ bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward
 		lyDestroyTensor(elementwiseProduct);
 		return false;
 	}
-
-	lyTensorMoveToCPU(pInput);
 
 	lyDestroyTensor(elementwiseProduct);
 	return true;

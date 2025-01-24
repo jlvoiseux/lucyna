@@ -63,9 +63,8 @@ void test_ChatPrompt(void)
 	TEST_ASSERT_NOT_NULL(tokenIds);
 	TEST_ASSERT_GREATER_THAN(0, tokenCount);
 
-	bool foundBos	 = false;
-	bool foundHeader = false;
-	bool foundEot	 = false;
+	bool foundBos = false;
+	bool foundEot = false;
 
 	for (int32_t i = 0; i < tokenCount; i++)
 	{

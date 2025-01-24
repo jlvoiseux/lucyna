@@ -109,49 +109,19 @@ bool lyRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount)
 	lyStack* shapeArray = (lyStack*)shapeArrayPtr;
 
 	lyTensor* pTensor;
-	if (!lyCreateTensor(&pTensor, LY_MEMORY_CPU))
-	{
-		return false;
-	}
-
-	int32_t* shape = (int32_t*)malloc(sizeof(int32_t) * shapeArray->count);
-	if (!shape)
-	{
-		lyDestroyTensor(pTensor);
-		return false;
-	}
-
+	int32_t*  shape = (int32_t*)malloc(sizeof(int32_t) * shapeArray->count);
 	for (size_t i = 0; i < shapeArray->count; i++)
 	{
 		int64_t val;
 		if (!lyGetIntValue(shapeArray->items[i], &val))
 		{
 			free(shape);
-			lyDestroyTensor(pTensor);
 			return false;
 		}
 		shape[i] = (int32_t)val;
 	}
-
-	if (!lySetTensorShape(pTensor, shape, (int32_t)shapeArray->count))
-	{
-		free(shape);
-		lyDestroyTensor(pTensor);
-		return false;
-	}
+	lyCreateTensor(&pTensor, shape, (int32_t)shapeArray->count, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), NULL);
 	free(shape);
-
-	size_t totalSize = 1;
-	for (int32_t i = 0; i < pTensor->rank; i++)
-	{
-		totalSize *= pTensor->shape[i];
-	}
-
-	if (!lySetTensorData(pTensor, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), totalSize * sizeof(nv_bfloat16)))
-	{
-		lyDestroyTensor(pTensor);
-		return false;
-	}
 
 	*ppTensor = pTensor;
 	return true;

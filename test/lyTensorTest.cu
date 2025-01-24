@@ -8,10 +8,7 @@
 
 static lyTensor* pTensor = NULL;
 
-void setUp(void)
-{
-	TEST_ASSERT_TRUE(lyCreateTensor(&pTensor, LY_MEMORY_CPU));
-}
+void setUp(void) {}
 
 void tearDown(void)
 {
@@ -25,7 +22,7 @@ void tearDown(void)
 void test_SetTensorShape(void)
 {
 	int32_t shape[] = {2, 3, 4};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, shape, 3));
+	lyCreateTensor(&pTensor, shape, 3, NULL, NULL);
 
 	TEST_ASSERT_EQUAL_INT32(3, pTensor->rank);
 	TEST_ASSERT_EQUAL_INT32(2, pTensor->shape[0]);
@@ -35,25 +32,35 @@ void test_SetTensorShape(void)
 
 void test_SetTensorData(void)
 {
-	int32_t shape[] = {2, 2};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, shape, 2));
-
+	int32_t		shape[] = {2, 2};
 	nv_bfloat16 hostData[4];
 	for (int i = 0; i < 4; i++)
 	{
 		hostData[i] = __float2bfloat16((float)i);
 	}
 
-	TEST_ASSERT_TRUE(lySetTensorData(pTensor, hostData, sizeof(hostData)));
+	lyCreateTensor(&pTensor, shape, 2, hostData, NULL);
+
+	TEST_ASSERT_EQUAL_INT32(2, pTensor->rank);
+	TEST_ASSERT_EQUAL_INT32(2, pTensor->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(2, pTensor->shape[1]);
+
+	for (int i = 0; i < 4; i++)
+	{
+		float expected = (float)i;
+		float actual;
+		TEST_ASSERT_TRUE(lyTensorGetItemAsFloat32(&actual, pTensor, i));
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
+	}
 }
 
 void test_ReshapeTensor(void)
 {
 	int32_t originalShape[] = {2, 3};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, originalShape, 2));
+	lyCreateTensor(&pTensor, originalShape, 2, NULL, NULL);
 
 	int32_t newShape[] = {3, 2};
-	TEST_ASSERT_TRUE(lyReshapeTensor(pTensor, newShape, 2));
+	lyReshapeTensor(pTensor, newShape, 2);
 
 	TEST_ASSERT_EQUAL_INT32(2, pTensor->rank);
 	TEST_ASSERT_EQUAL_INT32(3, pTensor->shape[0]);
@@ -62,18 +69,17 @@ void test_ReshapeTensor(void)
 
 void test_TensorSlice(void)
 {
-	int32_t shape[] = {4, 2};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, shape, 2));
-
+	int32_t		shape[] = {4, 2};
 	nv_bfloat16 hostData[8];
 	for (int i = 0; i < 8; i++)
 	{
 		hostData[i] = __float2bfloat16((float)i);
 	}
-	TEST_ASSERT_TRUE(lySetTensorData(pTensor, hostData, sizeof(hostData)));
+
+	lyCreateTensor(&pTensor, shape, 2, hostData, NULL);
 
 	lyTensor* pSliced;
-	TEST_ASSERT_TRUE(lyTensorSlice(&pSliced, pTensor, 1, 3));
+	lyTensorSlice(&pSliced, pTensor, 1, 3);
 
 	TEST_ASSERT_EQUAL_INT32(2, pSliced->shape[0]);
 	TEST_ASSERT_EQUAL_INT32(2, pSliced->shape[1]);
@@ -84,8 +90,7 @@ void test_TensorSlice(void)
 void test_TensorGetSetItem(void)
 {
 	int32_t shape[] = {2, 2};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, shape, 2));
-	TEST_ASSERT_TRUE(lySetTensorData(pTensor, NULL, 4 * sizeof(nv_bfloat16)));	// Initialize with zeros
+	lyCreateTensor(&pTensor, shape, 2, NULL, NULL);
 
 	int32_t loc[] = {0, 1};
 	TEST_ASSERT_TRUE(lyTensorSetItem(pTensor, loc, 42));
@@ -98,9 +103,7 @@ void test_TensorGetSetItem(void)
 void test_TensorGetSetFloat(void)
 {
 	int32_t shape[] = {2};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, shape, 1));
-	TEST_ASSERT_TRUE(lySetTensorData(pTensor, NULL, 2 * sizeof(nv_bfloat16)));	// Initialize with zeros
-
+	lyCreateTensor(&pTensor, shape, 1, NULL, NULL);
 	TEST_ASSERT_TRUE(lyTensorSetItemFromFloat32(pTensor, 0, 3.14f));
 
 	float value;
@@ -111,9 +114,7 @@ void test_TensorGetSetFloat(void)
 void test_TensorComplexItem(void)
 {
 	int32_t shape[] = {2, 2};
-	TEST_ASSERT_TRUE(lySetTensorShape(pTensor, shape, 2));
-	TEST_ASSERT_TRUE(lySetTensorData(pTensor, NULL, 4 * sizeof(nv_bfloat16)));	// Initialize with zeros
-
+	lyCreateTensor(&pTensor, shape, 2, NULL, NULL);
 	TEST_ASSERT_TRUE(lyTensorSetComplexItem(pTensor, 0, 1, 1.0f, 2.0f));
 
 	float real, imag;
