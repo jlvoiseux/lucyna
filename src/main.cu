@@ -77,10 +77,6 @@ int main(int argc, char** argv)
 		fflush(stdout);
 		free(decodedText);
 
-		printf("%s", decodedText);
-		fflush(stdout);
-		free(decodedText);
-
 		if (result.state != GSInProgress)
 		{
 			printf("\n");
