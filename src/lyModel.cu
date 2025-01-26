@@ -3,13 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool lyCreateDefaultModelArgs(lyModelArgs* pArgs)
+void lyModelCreateDefaultArgs(lyModelArgs* pArgs)
 {
-	if (!pArgs)
-	{
-		return false;
-	}
-
 	pArgs->dim				 = 4096;
 	pArgs->nLayers			 = 32;
 	pArgs->nHeads			 = 32;
@@ -19,21 +14,14 @@ bool lyCreateDefaultModelArgs(lyModelArgs* pArgs)
 	pArgs->ffnDimMultiplier	 = -1.0f;
 	pArgs->normEps			 = 1e-5f;
 	pArgs->ropeTheta		 = 500000.0f;
-	pArgs->useScaledRope	 = false;
 	pArgs->maxSequenceLength = 2048;
 	pArgs->nRep				 = 0;
 	pArgs->headDim			 = pArgs->dim / pArgs->nHeads;
-
-	return true;
+	pArgs->useScaledRope	 = false;
 }
 
-bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* name)
+void lyModelGetTensor(lyTensor** ppTensor, const lyModel* pModel, const char* name)
 {
-	if (!ppTensor || !pModel || !name)
-	{
-		return false;
-	}
-
 	lyTensor* pModelTensor = NULL;
 	for (int32_t i = 0; i < pModel->tensorCount; i++)
 	{
@@ -44,11 +32,5 @@ bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* na
 		}
 	}
 
-	if (!pModelTensor)
-	{
-		return false;
-	}
-
 	*ppTensor = pModelTensor;
-	return true;
 }

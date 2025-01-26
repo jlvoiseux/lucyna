@@ -7,18 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex)
+void lyAttentionCreate(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex)
 {
-	if (!ppAttention || !pModel)
-	{
-		return false;
-	}
-
 	lyAttention* pAttention = (lyAttention*)malloc(sizeof(lyAttention));
-	if (!pAttention)
-	{
-		return false;
-	}
 
 	pAttention->layerIndex = layerIndex;
 	pAttention->nHeads	   = pModel->args.nHeads;
@@ -30,293 +21,186 @@ bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t
 	int32_t perm[] = {1, 0};
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wq.weight", layerIndex);
-	lyTensor* tempWQ;
-	if (!lyGetModelTensor(&tempWQ, pModel, tensorName))
-	{
-		free(pAttention);
-		return false;
-	}
-	if (!lyTensorTranspose(&pAttention->attnWQ, tempWQ, perm))
-	{
-		lyDestroyTensor(tempWQ);
-		free(pAttention);
-		return false;
-	}
+	lyTensor* modelWQ;
+	lyModelGetTensor(&modelWQ, pModel, tensorName);
+	lyTensorTranspose(&pAttention->attnWQ, modelWQ, perm);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wk.weight", layerIndex);
-	lyTensor* tempWK;
-	if (!lyGetModelTensor(&tempWK, pModel, tensorName))
-	{
-		lyDestroyAttention(pAttention);
-		return false;
-	}
-	if (!lyTensorTranspose(&pAttention->attnWK, tempWK, perm))
-	{
-		lyDestroyTensor(tempWK);
-		lyDestroyAttention(pAttention);
-		return false;
-	}
+	lyTensor* modelWK;
+	lyModelGetTensor(&modelWK, pModel, tensorName);
+	lyTensorTranspose(&pAttention->attnWK, modelWK, perm);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wv.weight", layerIndex);
-	lyTensor* tempWV;
-	if (!lyGetModelTensor(&tempWV, pModel, tensorName))
-	{
-		lyDestroyAttention(pAttention);
-		return false;
-	}
-	if (!lyTensorTranspose(&pAttention->attnWV, tempWV, perm))
-	{
-		lyDestroyTensor(tempWV);
-		lyDestroyAttention(pAttention);
-		return false;
-	}
+	lyTensor* modelWV;
+	lyModelGetTensor(&modelWV, pModel, tensorName);
+	lyTensorTranspose(&pAttention->attnWV, modelWV, perm);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wo.weight", layerIndex);
-	lyTensor* tempWO;
-	if (!lyGetModelTensor(&tempWO, pModel, tensorName))
-	{
-		lyDestroyAttention(pAttention);
-		return false;
-	}
-	if (!lyTensorTranspose(&pAttention->attnWO, tempWO, perm))
-	{
-		lyDestroyTensor(tempWO);
-		lyDestroyAttention(pAttention);
-		return false;
-	}
+	lyTensor* modelWO;
+	lyModelGetTensor(&modelWO, pModel, tensorName);
+	lyTensorTranspose(&pAttention->attnWO, modelWO, perm);
 
-	int32_t cacheShape[] = {pModel->args.maxSequenceLength, pModel->args.nKVHeads, pModel->args.headDim};
-
+	int32_t	  cacheShape[] = {pModel->args.maxSequenceLength, pModel->args.nKVHeads, pModel->args.headDim};
 	lyTensor* pCacheK;
-	lyCreateTensor(&pCacheK, cacheShape, 3, NULL, NULL);
-
 	lyTensor* pCacheV;
-	lyCreateTensor(&pCacheV, cacheShape, 3, NULL, NULL);
-
+	lyTensorCreate(&pCacheK, cacheShape, 3, NULL, NULL);
+	lyTensorCreate(&pCacheV, cacheShape, 3, NULL, NULL);
 	pAttention->cacheK = pCacheK;
 	pAttention->cacheV = pCacheV;
-
-	*ppAttention = pAttention;
-
-	return true;
+	*ppAttention	   = pAttention;
 }
 
-void lyDestroyAttention(lyAttention* pAttention)
+void lyAttentionDestroy(lyAttention* pAttention)
 {
 	if (!pAttention)
 	{
 		return;
 	}
 
-	lyDestroyTensor(pAttention->cacheK);
-	lyDestroyTensor(pAttention->cacheV);
+	lyTensorDestroy(pAttention->cacheK);
+	lyTensorDestroy(pAttention->cacheV);
 	free(pAttention);
 }
 
-bool lyRepeatKV(lyTensor** ppOutput, lyTensor* pInput, int32_t nRep)
+void lyRepeatKV(lyTensor** ppOutput, lyTensor* pInput, int32_t nRep)
 {
-	if (!ppOutput || !pInput || nRep <= 0)
-	{
-		return false;
-	}
-
 	if (nRep == 1)
 	{
 		lyTensor* pOutput;
-		lyCreateTensor(&pOutput, pInput->shape, pInput->rank, pInput->data, NULL);
+		lyTensorCreate(&pOutput, pInput->shape, pInput->rank, pInput->data, NULL);
 		*ppOutput = pOutput;
-		return true;
 	}
-
-	if (pInput->rank != 3)
+	else
 	{
-		return false;
-	}
+		int32_t seqLen	 = pInput->shape[0];
+		int32_t nKVHeads = pInput->shape[1];
+		int32_t headDim	 = pInput->shape[2];
 
-	int32_t seqLen	 = pInput->shape[0];
-	int32_t nKVHeads = pInput->shape[1];
-	int32_t headDim	 = pInput->shape[2];
+		lyTensor* pOutput;
+		int32_t	  outputShape[] = {seqLen, nKVHeads * nRep, headDim};
+		lyTensorCreate(&pOutput, outputShape, 3, NULL, NULL);
 
-	lyTensor* pOutput;
-	int32_t	  outputShape[] = {seqLen, nKVHeads * nRep, headDim};
-	lyCreateTensor(&pOutput, outputShape, 3, NULL, NULL);
-
-	size_t sliceSize = nKVHeads * headDim * sizeof(nv_bfloat16);
-	for (int32_t i = 0; i < seqLen; i++)
-	{
-		for (int32_t j = 0; j < nRep; j++)
+		size_t sliceSize = nKVHeads * headDim * sizeof(nv_bfloat16);
+		for (int32_t i = 0; i < seqLen; i++)
 		{
-			size_t srcOffset = i * sliceSize;
-			size_t dstOffset = (i * nKVHeads * nRep + j * nKVHeads) * headDim * sizeof(nv_bfloat16);
-			memcpy((uint8_t*)pOutput->data + dstOffset, (uint8_t*)pInput->data + srcOffset, sliceSize);
+			for (int32_t j = 0; j < nRep; j++)
+			{
+				size_t srcOffset = i * sliceSize;
+				size_t dstOffset = (i * nKVHeads * nRep + j * nKVHeads) * headDim * sizeof(nv_bfloat16);
+				memcpy((uint8_t*)pOutput->data + dstOffset, (uint8_t*)pInput->data + srcOffset, sliceSize);
+			}
 		}
-	}
 
-	*ppOutput = pOutput;
-	return true;
+		*ppOutput = pOutput;
+	}
 }
 
-bool lyUpdateKVCache(lyAttention* pAttention, lyTensor* pK, lyTensor* pV, int32_t startPos)
+void lyUpdateKVCache(lyAttention* pAttention, lyTensor* pK, lyTensor* pV, int32_t startPos)
 {
-	if (!pAttention || !pK || !pV || startPos < 0)
-	{
-		return false;
-	}
+	int32_t seqLen = pK->shape[0];
 
-	int32_t seqLen	  = pK->shape[0];
-	int32_t maxSeqLen = pAttention->cacheK->shape[0];
+	int32_t elementsPerPos = pAttention->nKVHeads * pAttention->headDim;
+	size_t	offsetElements = startPos * elementsPerPos;
+	size_t	copyElements   = seqLen * elementsPerPos;
+	size_t	copyBytes	   = copyElements * sizeof(nv_bfloat16);
 
-	if (startPos + seqLen > maxSeqLen)
-	{
-		return false;
-	}
+	nv_bfloat16* kDst = pAttention->cacheK->data + offsetElements;
+	nv_bfloat16* vDst = pAttention->cacheV->data + offsetElements;
 
-	int32_t totalElements = seqLen * pAttention->nKVHeads * pAttention->headDim;
-	memcpy(pAttention->cacheK->data + startPos * pAttention->nKVHeads * pAttention->headDim, pK->data, totalElements * sizeof(nv_bfloat16));
-	memcpy(pAttention->cacheV->data + startPos * pAttention->nKVHeads * pAttention->headDim, pV->data, totalElements * sizeof(nv_bfloat16));
+	memcpy(kDst, pK->data, copyBytes);
+	memcpy(vDst, pV->data, copyBytes);
 
-	return true;
+	lyTensorPrint(pAttention->cacheK);
+	lyTensorPrint(pAttention->cacheV);
 }
 
-bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
+void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
 {
-	if (!ppOutput || !pAttention || !pInput || !pFreqsCis)
-	{
-		return false;
-	}
+	lyTensorPrint(pInput);
 
 	lyTensor *xq, *xk, *xv;
-	if (!lyTensorMatMul(&xq, pInput, pAttention->attnWQ))
-	{
-		return false;
-	}
+	lyTensorMatMul(&xq, pInput, pAttention->attnWQ);
+	lyTensorMatMul(&xk, pInput, pAttention->attnWK);
+	lyTensorMatMul(&xv, pInput, pAttention->attnWV);
+	lyTensorPrint(xq);
+	lyTensorPrint(xk);
+	lyTensorPrint(xv);
 
-	if (!lyTensorMatMul(&xk, pInput, pAttention->attnWK))
-	{
-		return false;
-	}
-
-	if (!lyTensorMatMul(&xv, pInput, pAttention->attnWV))
-	{
-		return false;
-	}
-
-	int32_t seqLen	 = pInput->shape[0];
-	int32_t qShape[] = {seqLen, pAttention->nHeads, pAttention->headDim};
-	lyReshapeTensor(xq, qShape, 3);
-
+	int32_t seqLen	  = pInput->shape[0];
+	int32_t qShape[]  = {seqLen, pAttention->nHeads, pAttention->headDim};
 	int32_t kvShape[] = {seqLen, pAttention->nKVHeads, pAttention->headDim};
-	lyReshapeTensor(xk, kvShape, 3);
-	lyReshapeTensor(xv, kvShape, 3);
+	lyTensorReshape(xq, qShape, 3);
+	lyTensorReshape(xk, kvShape, 3);
+	lyTensorReshape(xv, kvShape, 3);
+	lyTensorPrint(xq);
+	lyTensorPrint(xk);
+	lyTensorPrint(xv);
 
 	lyTensor *rotatedQ, *rotatedK;
-	if (!lyApplyRotaryEmbedding(&rotatedQ, &rotatedK, xq, xk, pFreqsCis))
-	{
-		lyDestroyTensor(xq);
-		lyDestroyTensor(xk);
-		lyDestroyTensor(xv);
-		return false;
-	}
+	lyRopeApplyEmbeddings(&rotatedQ, &rotatedK, xq, xk, pFreqsCis);
+	lyTensorDestroy(xq);
+	lyTensorDestroy(xk);
+	lyTensorPrint(rotatedQ);
+	lyTensorPrint(rotatedK);
 
-	lyDestroyTensor(xq);
-	lyDestroyTensor(xk);
-
-	if (!lyUpdateKVCache(pAttention, rotatedK, xv, startPos))
-	{
-		lyDestroyTensor(rotatedQ);
-		lyDestroyTensor(rotatedK);
-		lyDestroyTensor(xv);
-		return false;
-	}
+	lyUpdateKVCache(pAttention, rotatedK, xv, startPos);
 
 	lyTensor *keys, *values;
 	lyTensorSlice(&keys, pAttention->cacheK, 0, startPos + seqLen);
 	lyTensorSlice(&values, pAttention->cacheV, 0, startPos + seqLen);
+	lyTensorPrint(keys);
+	lyTensorPrint(values);
 
 	lyTensor *repeatedKeys, *repeatedValues;
-	if (!lyRepeatKV(&repeatedKeys, keys, pAttention->nRep) || !lyRepeatKV(&repeatedValues, values, pAttention->nRep))
-	{
-		lyDestroyTensor(keys);
-		lyDestroyTensor(values);
-		lyDestroyTensor(rotatedQ);
-		lyDestroyTensor(rotatedK);
-		lyDestroyTensor(xv);
-		return false;
-	}
+	lyRepeatKV(&repeatedKeys, keys, pAttention->nRep);
+	lyRepeatKV(&repeatedValues, values, pAttention->nRep);
+	lyTensorPrint(repeatedKeys);
+	lyTensorPrint(repeatedValues);
 
-	lyDestroyTensor(keys);
-	lyDestroyTensor(values);
-	lyDestroyTensor(rotatedK);
-	lyDestroyTensor(xv);
+	lyTensorDestroy(keys);
+	lyTensorDestroy(values);
+	lyTensorDestroy(rotatedK);
+	lyTensorDestroy(xv);
 
-	lyTensor *transposedQ, *transposedK, *transposedV;
+	lyTensor *transposedQ, *transposedK, *transposedV, *reTransposedK;
 	int32_t	  perm1[] = {1, 0, 2};
 	int32_t	  perm2[] = {0, 2, 1};
 
-	if (!lyTensorTranspose(&transposedQ, rotatedQ, perm1) || !lyTensorTranspose(&transposedK, repeatedKeys, perm1) || !lyTensorTranspose(&transposedV, repeatedValues, perm1))
-	{
-		lyDestroyTensor(rotatedQ);
-		lyDestroyTensor(repeatedKeys);
-		lyDestroyTensor(repeatedValues);
-		return false;
-	}
-
-	lyDestroyTensor(rotatedQ);
-	lyDestroyTensor(repeatedKeys);
-	lyDestroyTensor(repeatedValues);
-
-	lyTensor* reTransposedK;
-	if (!lyTensorTranspose(&reTransposedK, transposedK, perm2))
-	{
-		lyDestroyTensor(transposedQ);
-		lyDestroyTensor(transposedK);
-		lyDestroyTensor(transposedV);
-		return false;
-	}
-	lyDestroyTensor(transposedK);
+	lyTensorTranspose(&transposedQ, rotatedQ, perm1);
+	lyTensorTranspose(&transposedK, repeatedKeys, perm1);
+	lyTensorTranspose(&reTransposedK, transposedK, perm2);
+	lyTensorTranspose(&transposedV, repeatedValues, perm1);
+	lyTensorDestroy(rotatedQ);
+	lyTensorDestroy(repeatedKeys);
+	lyTensorDestroy(repeatedValues);
+	lyTensorDestroy(transposedK);
+	lyTensorPrint(transposedQ);
+	lyTensorPrint(reTransposedK);
+	lyTensorPrint(transposedV);
 
 	lyTensor* scores;
-	if (!lyTensorMatMul(&scores, transposedQ, reTransposedK))
-	{
-		lyDestroyTensor(transposedQ);
-		lyDestroyTensor(reTransposedK);
-		lyDestroyTensor(transposedV);
-		return false;
-	}
+	lyTensorMatMul(&scores, transposedQ, reTransposedK);
+	lyTensorPrint(scores);
 
-	float scaleFactor = 1.0f / sqrt(pAttention->headDim);
-	if (!lyTensorScaleAndAdd(&scores, scores, pMask, scaleFactor, 1.0f))
-	{
-		lyDestroyTensor(scores);
-		lyDestroyTensor(transposedQ);
-		lyDestroyTensor(reTransposedK);
-		lyDestroyTensor(transposedV);
-		return false;
-	}
+	float	  scaleFactor = 1.0f / sqrt(pAttention->headDim);
+	lyTensor* scaledScores;
+	lyTensorScaleAndAdd(&scaledScores, scores, pMask, scaleFactor, 1.0f);
+	lyTensorDestroy(scores);
+	lyTensorPrint(scaledScores);
+
+	lyTensor* softmaxScores;
+	lyTensorSoftmax(&softmaxScores, scaledScores, scaledScores->rank - 1);
+	lyTensorDestroy(scaledScores);
+	lyTensorPrint(softmaxScores);
 
 	lyTensor* attnOut;
-	if (!lyTensorMatMul(&attnOut, scores, transposedV))
-	{
-		lyDestroyTensor(scores);
-		lyDestroyTensor(transposedQ);
-		lyDestroyTensor(reTransposedK);
-		lyDestroyTensor(transposedV);
-		return false;
-	}
-
-	lyDestroyTensor(scores);
-	lyDestroyTensor(transposedQ);
-	lyDestroyTensor(reTransposedK);
-	lyDestroyTensor(transposedV);
+	lyTensorMatMul(&attnOut, softmaxScores, transposedV);
+	lyTensorDestroy(softmaxScores);
+	lyTensorDestroy(transposedV);
+	lyTensorPrint(attnOut);
 
 	int32_t flatShape[] = {seqLen, pAttention->nHeads * pAttention->headDim};
-	lyReshapeTensor(attnOut, flatShape, 2);
-	if (!lyTensorMatMul(ppOutput, attnOut, pAttention->attnWO))
-	{
-		lyDestroyTensor(attnOut);
-		return false;
-	}
-
-	lyDestroyTensor(attnOut);
-	return true;
+	lyTensorReshape(attnOut, flatShape, 2);
+	lyTensorMatMul(ppOutput, attnOut, pAttention->attnWO);
+	lyTensorDestroy(attnOut);
 }

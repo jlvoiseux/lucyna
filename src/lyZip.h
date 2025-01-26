@@ -20,10 +20,10 @@ typedef struct lyZipFile
 	size_t		 entryCount;
 } lyZipFile;
 
-bool lyOpenZip(lyZipFile** ppZip, const char* filename);
-void lyCloseZip(lyZipFile* pZip);
+void lyZipOpen(lyZipFile** ppZip, const char* filename);
+void lyZipClose(lyZipFile* pZip);
 
-bool lyFindZipEntry(lyZipEntry** ppEntry, const lyZipFile* pZip, const char* filename);
-bool lyFindZipEntryPattern(lyZipEntry** ppEntry, const lyZipFile* pZip, const char* pattern);
+void lyZipFindEntry(lyZipEntry** ppEntry, const lyZipFile* pZip, const char* filename);
+void lyZipFindEntryPattern(lyZipEntry** ppEntry, const lyZipFile* pZip, const char* pattern);
 
-bool lyGetZipEntryData(const uint8_t** ppData, const lyZipFile* pZip, const lyZipEntry* pEntry);
+void lyZipGetEntryData(const uint8_t** ppData, const lyZipFile* pZip, const lyZipEntry* pEntry);

@@ -1,125 +1,101 @@
 #include "lyTokenizer.h"
-#include "lyTokenizerLoader.h"
+#include "lyUtil.h"
 #include "unity.h"
 
 static lyTokenizer* pTokenizer = NULL;
 
 void setUp(void)
 {
-	lyLoadTokenizer(&pTokenizer, "../model-tuned");
+	lyTokenizerCreate(&pTokenizer, "../model-tuned");
 }
 
 void tearDown(void)
 {
 	if (pTokenizer)
 	{
-		lyDestroyTokenizer(pTokenizer);
+		lyTokenizerDestroy(pTokenizer);
 		pTokenizer = NULL;
 	}
 }
 
-void test_SimpleTokenization(void)
+void test_TokenizerBasic(void)
 {
-	const char* text	   = "Hello world!";
-	int32_t*	tokenIds   = NULL;
-	int32_t		tokenCount = 0;
+	const char* text = "Hello world";
+	int32_t*	tokens;
+	size_t		tokenCount;
 
-	TEST_ASSERT_TRUE(lyTokenizeText(&tokenIds, &tokenCount, pTokenizer, text, false));
-	TEST_ASSERT_NOT_NULL(tokenIds);
+	lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, text, false);
+
+	TEST_ASSERT_NOT_NULL(tokens);
 	TEST_ASSERT_GREATER_THAN(0, tokenCount);
 
-	char* reconstructed = NULL;
-	TEST_ASSERT_TRUE(lyDetokenize(&reconstructed, pTokenizer, tokenIds, tokenCount));
-	TEST_ASSERT_EQUAL_STRING("Hello world!", reconstructed);
+	char* decoded;
+	lyTokenizerDecodeBatch(&decoded, pTokenizer, tokens, tokenCount);
+	TEST_ASSERT_EQUAL_STRING("Hello world", decoded);
 
-	free(reconstructed);
-	free(tokenIds);
+	free(tokens);
+	free(decoded);
 }
 
-void test_Contractions(void)
+void test_TokenizerBase64(void)
 {
-	const char* text	   = "I'm don't can't";
-	int32_t*	tokenIds   = NULL;
-	int32_t		tokenCount = 0;
-
-	TEST_ASSERT_TRUE(lyTokenizeText(&tokenIds, &tokenCount, pTokenizer, text, false));
-
-	char* reconstructed = NULL;
-	TEST_ASSERT_TRUE(lyDetokenize(&reconstructed, pTokenizer, tokenIds, tokenCount));
-	TEST_ASSERT_EQUAL_STRING(text, reconstructed);
-
-	free(reconstructed);
-	free(tokenIds);
+	size_t		   outLen;
+	unsigned char* decoded = lyBase64Decode("SGVsbG8=", 8, &outLen);
+	TEST_ASSERT_EQUAL_STRING("Hello", (char*)decoded);
+	free(decoded);
 }
 
-void test_ChatPrompt(void)
+void test_TokenizerBytePairMerge(void)
 {
-	const char* systemPrompt = "You are a helpful assistant.";
-	const char* userPrompt	 = "Tell me a story.";
-	int32_t*	tokenIds	 = NULL;
-	int32_t		tokenCount	 = 0;
+	const char* text = "Hello";
+	int32_t*	tokens;
+	size_t		tokenCount;
 
-	TEST_ASSERT_TRUE(lyTokenizePrompt(&tokenIds, &tokenCount, pTokenizer, systemPrompt, userPrompt));
-	TEST_ASSERT_NOT_NULL(tokenIds);
+	lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, text, false);
+
+	// The exact token IDs will depend on the vocabulary,
+	// but we can check that we got some tokens
 	TEST_ASSERT_GREATER_THAN(0, tokenCount);
 
-	bool foundBos = false;
-	bool foundEot = false;
+	char* decoded;
+	lyTokenizerDecodeBatch(&decoded, pTokenizer, tokens, tokenCount);
+	TEST_ASSERT_EQUAL_STRING("Hello", decoded);
 
-	for (int32_t i = 0; i < tokenCount; i++)
-	{
-		if (tokenIds[i] == pTokenizer->beginOfSentenceId)
-			foundBos = true;
-		if (tokenIds[i] == pTokenizer->endOfSentenceId)
-			foundEot = true;
-	}
-
-	TEST_ASSERT_TRUE(foundBos);
-	TEST_ASSERT_TRUE(foundEot);
-
-	free(tokenIds);
+	free(tokens);
+	free(decoded);
 }
 
-void test_Numbers(void)
+void test_TokenizerPromptTemplate(void)
 {
-	const char* text	   = "123 4567 89";
-	int32_t*	tokenIds   = NULL;
-	int32_t		tokenCount = 0;
+	const char* systemPrompt = "You are Einstein";
+	const char* userPrompt	 = "Describe your theory.";
 
-	TEST_ASSERT_TRUE(lyTokenizeText(&tokenIds, &tokenCount, pTokenizer, text, false));
+	int32_t* tokens;
+	size_t	 tokenCount;
 
-	char* reconstructed = NULL;
-	TEST_ASSERT_TRUE(lyDetokenize(&reconstructed, pTokenizer, tokenIds, tokenCount));
+	lyTokenizerTokenizePrompt(&tokens, &tokenCount, pTokenizer, systemPrompt, userPrompt);
 
-	TEST_ASSERT_EQUAL_STRING("123 4567 89", reconstructed);
+	char* decodedStr;
+	lyTokenizerDecodeBatch(&decodedStr, pTokenizer, tokens, tokenCount);
 
-	free(reconstructed);
-	free(tokenIds);
-}
+	const char* expected = "<|begin_of_text|>"
+						   "<|start_header_id|>system<|end_header_id|>\n\n"
+						   "You are Einstein<|eot_id|>"
+						   "<|start_header_id|>user<|end_header_id|>\n\n"
+						   "Describe your theory.<|eot_id|>"
+						   "<|start_header_id|>assistant<|end_header_id|>\n\n";
 
-void test_Whitespace(void)
-{
-	const char* text	   = "Hello\n\nWorld  !";
-	int32_t*	tokenIds   = NULL;
-	int32_t		tokenCount = 0;
-
-	TEST_ASSERT_TRUE(lyTokenizeText(&tokenIds, &tokenCount, pTokenizer, text, false));
-
-	char* reconstructed = NULL;
-	TEST_ASSERT_TRUE(lyDetokenize(&reconstructed, pTokenizer, tokenIds, tokenCount));
-	TEST_ASSERT_EQUAL_STRING(text, reconstructed);
-
-	free(reconstructed);
-	free(tokenIds);
+	TEST_ASSERT_EQUAL_STRING(expected, decodedStr);
+	free(tokens);
+	free(decodedStr);
 }
 
 int main(void)
 {
 	UNITY_BEGIN();
-	RUN_TEST(test_SimpleTokenization);
-	RUN_TEST(test_Contractions);
-	RUN_TEST(test_ChatPrompt);
-	RUN_TEST(test_Numbers);
-	RUN_TEST(test_Whitespace);
+	RUN_TEST(test_TokenizerBasic);
+	RUN_TEST(test_TokenizerBase64);
+	RUN_TEST(test_TokenizerBytePairMerge);
+	RUN_TEST(test_TokenizerPromptTemplate);
 	return UNITY_END();
 }

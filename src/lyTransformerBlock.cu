@@ -4,144 +4,70 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-bool lyCreateTransformerBlock(lyTransformerBlock** ppBlock, const lyModel* pModel, int32_t layerIndex)
+void lyTransformerBlockCreate(lyTransformerBlock** ppBlock, const lyModel* pModel, int32_t layerIndex)
 {
-	if (!ppBlock || !pModel)
-	{
-		return false;
-	}
-
 	lyTransformerBlock* pBlock = (lyTransformerBlock*)malloc(sizeof(lyTransformerBlock));
-	if (!pBlock)
-	{
-		return false;
-	}
-
-	pBlock->layerIndex = layerIndex;
+	pBlock->layerIndex		   = layerIndex;
 
 	lyTensor* attnNormWeights;
 	char	  attnNormName[64];
 	snprintf(attnNormName, sizeof(attnNormName), "layers.%d.attention_norm.weight", layerIndex);
-	if (!lyGetModelTensor(&attnNormWeights, pModel, attnNormName))
-	{
-		free(pBlock);
-		return false;
-	}
-
-	if (!lyCreateRMSNorm(&pBlock->attnNorm, pModel->args.normEps, attnNormWeights))
-	{
-		lyDestroyTensor(attnNormWeights);
-		free(pBlock);
-		return false;
-	}
-
-	if (!lyCreateAttention(&pBlock->attention, pModel, layerIndex))
-	{
-		lyDestroyRMSNorm(pBlock->attnNorm);
-		free(pBlock);
-		return false;
-	}
+	lyModelGetTensor(&attnNormWeights, pModel, attnNormName);
+	lyRMSNormCreate(&pBlock->attnNorm, pModel->args.normEps, attnNormWeights);
+	lyAttentionCreate(&pBlock->attention, pModel, layerIndex);
 
 	lyTensor* ffnNormWeights;
 	char	  ffnNormName[64];
 	snprintf(ffnNormName, sizeof(ffnNormName), "layers.%d.ffn_norm.weight", layerIndex);
-	if (!lyGetModelTensor(&ffnNormWeights, pModel, ffnNormName))
-	{
-		lyDestroyAttention(pBlock->attention);
-		lyDestroyRMSNorm(pBlock->attnNorm);
-		free(pBlock);
-		return false;
-	}
-
-	if (!lyCreateRMSNorm(&pBlock->ffnNorm, pModel->args.normEps, ffnNormWeights))
-	{
-		lyDestroyTensor(ffnNormWeights);
-		lyDestroyAttention(pBlock->attention);
-		lyDestroyRMSNorm(pBlock->attnNorm);
-		free(pBlock);
-		return false;
-	}
-
-	if (!lyCreateFeedForward(&pBlock->feedForward, pModel, layerIndex))
-	{
-		lyDestroyRMSNorm(pBlock->ffnNorm);
-		lyDestroyAttention(pBlock->attention);
-		lyDestroyRMSNorm(pBlock->attnNorm);
-		free(pBlock);
-		return false;
-	}
+	lyModelGetTensor(&ffnNormWeights, pModel, ffnNormName);
+	lyRMSNormCreate(&pBlock->ffnNorm, pModel->args.normEps, ffnNormWeights);
+	lyFeedForwardCreate(&pBlock->feedForward, pModel, layerIndex);
 
 	*ppBlock = pBlock;
-	return true;
 }
 
-void lyDestroyTransformerBlock(lyTransformerBlock* pBlock)
+void lyTransformerBlockDestroy(lyTransformerBlock* pBlock)
 {
 	if (!pBlock)
 	{
 		return;
 	}
 
-	lyDestroyFeedForward(pBlock->feedForward);
-	lyDestroyRMSNorm(pBlock->ffnNorm);
-	lyDestroyAttention(pBlock->attention);
-	lyDestroyRMSNorm(pBlock->attnNorm);
+	lyFeedForwardDestroy(pBlock->feedForward);
+	lyRMSNormDestroy(pBlock->ffnNorm);
+	lyAttentionDestroy(pBlock->attention);
+	lyRMSNormDestroy(pBlock->attnNorm);
 	free(pBlock);
 }
 
-bool lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
+void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
 {
-	if (!ppOutput || !pBlock || !pInput || !pFreqsCis)
-	{
-		return false;
-	}
+	lyTensorPrint(pInput);
 
-	lyTensor* normalizedInput;
-	if (!lyRMSNormForward(&normalizedInput, pBlock->attnNorm, pInput))
-	{
-		return false;
-	}
+	lyTensor* pNormalizedInput;
+	lyRMSNormForward(&pNormalizedInput, pBlock->attnNorm, pInput);
+	lyTensorPrint(pNormalizedInput);
 
-	lyTensor* attnOutput;
-	if (!lyAttentionForward(&attnOutput, pBlock->attention, normalizedInput, startPos, pFreqsCis, pMask))
-	{
-		lyDestroyTensor(normalizedInput);
-		return false;
-	}
-	lyDestroyTensor(normalizedInput);
+	lyTensor* pAttnOutput;
+	lyAttentionForward(&pAttnOutput, pBlock->attention, pNormalizedInput, startPos, pFreqsCis, pMask);
+	lyTensorDestroy(pNormalizedInput);
+	lyTensorPrint(pAttnOutput);
 
-	lyTensor* residual;
-	if (!lyTensorScaleAndAdd(&residual, pInput, attnOutput, 1.f, 1.f))
-	{
-		lyDestroyTensor(attnOutput);
-		return false;
-	}
-	lyDestroyTensor(attnOutput);
+	lyTensor* pResidual;
+	lyTensorScaleAndAdd(&pResidual, pInput, pAttnOutput, 1.f, 1.f);
+	lyTensorDestroy(pAttnOutput);
+	lyTensorPrint(pResidual);
 
 	lyTensor* normalizedResidual;
-	if (!lyRMSNormForward(&normalizedResidual, pBlock->ffnNorm, residual))
-	{
-		lyDestroyTensor(residual);
-		return false;
-	}
+	lyRMSNormForward(&normalizedResidual, pBlock->ffnNorm, pResidual);
+	lyTensorPrint(normalizedResidual);
 
 	lyTensor* ffnOutput;
-	if (!lyFeedForwardForward(&ffnOutput, pBlock->feedForward, normalizedResidual))
-	{
-		lyDestroyTensor(normalizedResidual);
-		lyDestroyTensor(residual);
-		return false;
-	}
-	lyDestroyTensor(normalizedResidual);
+	lyFeedForwardForward(&ffnOutput, pBlock->feedForward, normalizedResidual);
+	lyTensorDestroy(normalizedResidual);
+	lyTensorPrint(ffnOutput);
 
-	if (!lyTensorScaleAndAdd(ppOutput, residual, ffnOutput, 1.f, 1.f))
-	{
-		lyDestroyTensor(ffnOutput);
-		lyDestroyTensor(residual);
-		return false;
-	}
-	lyDestroyTensor(ffnOutput);
-	lyDestroyTensor(residual);
-
-	return true;
+	lyTensorScaleAndAdd(ppOutput, pResidual, ffnOutput, 1.f, 1.f);
+	lyTensorDestroy(ffnOutput);
+	lyTensorDestroy(pResidual);
 }

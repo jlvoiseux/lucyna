@@ -14,12 +14,22 @@ file(GLOB BASE_SOURCES "src/ly*.cu")
 include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/test)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
+include(FetchContent)
+
+FetchContent_Declare(
+        pcre
+        GIT_REPOSITORY https://github.com/PCRE2Project/pcre2.git
+        GIT_TAG pcre2-10.44
+)
+FetchContent_MakeAvailable(pcre)
+include_directories(${pcre_BINARY_DIR})
 
 add_library(lucyna_lib STATIC ${BASE_SOURCES})
 set_target_properties(lucyna_lib PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
         CUDA_SOURCE_PROPERTY_FORMAT C
 )
+target_link_libraries(lucyna_lib pcre2-8)
 
 add_executable(lucyna "src/main.cu")
 target_link_libraries(lucyna lucyna_lib)
@@ -38,7 +48,6 @@ if (MSVC)
     )
 endif ()
 
-include(FetchContent)
 FetchContent_Declare(
         unity
         GIT_REPOSITORY https://github.com/ThrowTheSwitch/Unity.git

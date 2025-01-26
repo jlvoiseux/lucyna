@@ -1,144 +1,76 @@
 #include "lyInference.h"
 #include "lyTensorMath.h"
-#include "lyTokenizerLoader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-bool lyCreateInference(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir)
+void lyInferenceCreate(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir)
 {
-	if (!ppInference || !pModel || sequenceLength <= 0 || !modelDir)
-	{
-		return false;
-	}
-
 	lyInference* pInference = (lyInference*)malloc(sizeof(lyInference));
-	if (!pInference)
-	{
-		return false;
-	}
 
 	pInference->model		   = pModel;
 	pInference->sequenceLength = sequenceLength;
 	pInference->logFn		   = logFn;
 
-	if (!lyCreateTransformer(&pInference->transformer, pModel))
-	{
-		free(pInference);
-		return false;
-	}
-
-	if (!lyLoadTokenizer(&pInference->tokenizer, modelDir))
-	{
-		lyDestroyTransformer(pInference->transformer);
-		free(pInference);
-		return false;
-	}
+	lyTransformerCreate(&pInference->transformer, pModel);
+	lyTokenizerCreate(&pInference->tokenizer, "../model-tuned");
 
 	*ppInference = pInference;
-	return true;
 }
 
-void lyDestroyInference(lyInference* pInference)
+void lyInferenceDestroy(lyInference* pInference)
 {
-	if (!pInference)
-	{
-		return;
-	}
-
 	if (pInference->transformer)
-	{
-		lyDestroyTransformer(pInference->transformer);
-	}
+		lyTransformerDestroy(pInference->transformer);
 
 	if (pInference->tokenizer)
-	{
-		lyDestroyTokenizer(pInference->tokenizer);
-	}
+		lyTokenizerDestroy(pInference->tokenizer);
 
 	free(pInference);
 }
 
-bool lyCreateInferenceTokens(lyTensor** ppTokens, const lyInference* pInference, const int32_t* tokenIds, int32_t tokenCount)
+void lyInferenceCreateInputTokens(lyTensor** ppTokens, const int32_t* tokenIds, int32_t tokenCount)
 {
-	if (!ppTokens || !pInference || !tokenIds || tokenCount <= 0)
-	{
-		return false;
-	}
-
-	int32_t	  shape[] = {pInference->sequenceLength};
+	int32_t	  shape[] = {tokenCount};
 	lyTensor* tokens;
-	lyCreateTensor(&tokens, shape, 1, NULL, NULL);
-
-	for (int32_t i = 0; i < pInference->sequenceLength; i++)
-	{
-		if (!lyTensorSetItem(tokens, &i, -1))
-		{
-			lyDestroyTensor(tokens);
-			return false;
-		}
-	}
+	lyTensorCreate(&tokens, shape, 1, NULL, NULL);
 
 	for (int32_t i = 0; i < tokenCount; i++)
-	{
-		if (!lyTensorSetItem(tokens, &i, tokenIds[i]))
-		{
-			lyDestroyTensor(tokens);
-			return false;
-		}
-	}
+		lyTensorSetItem(tokens, &i, tokenIds[i]);
 
 	*ppTokens = tokens;
-	return true;
 }
 
-bool lyGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, lyTensor* pInputTokens, int32_t startPos)
+void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, lyTensor* pInputTokens, int32_t startPos)
 {
-	if (!pResult || !pInference || !pInputTokens || startPos < 0)
-	{
-		return false;
-	}
+	lyTensorPrint(pInputTokens);
 
 	lyTensor* logits;
-	if (!lyTransformerForward(&logits, pInference->transformer, pInputTokens, startPos))
-	{
-		return false;
-	}
+	lyTransformerForward(&logits, pInference->transformer, pInputTokens, startPos);
+	lyTensorPrint(logits);
 
 	lyTensor* lastLogits;
 	lyTensorSlice(&lastLogits, logits, logits->shape[0] - 1, logits->shape[0]);
-	lyDestroyTensor(logits);
+	lyTensorDestroy(logits);
+	lyTensorPrint(lastLogits);
 
 	lyTensor* maxToken;
-	if (!lyTensorArgmax(&maxToken, lastLogits, lastLogits->rank - 1))
-	{
-		lyDestroyTensor(lastLogits);
-		return false;
-	}
-	lyDestroyTensor(lastLogits);
+	lyTensorArgmax(&maxToken, lastLogits, lastLogits->rank - 1);
+	lyTensorDestroy(lastLogits);
+	lyTensorPrint(maxToken);
 
 	int32_t nextToken;
-	if (!lyTensorGetItem(&nextToken, maxToken, 0))
-	{
-		lyDestroyTensor(maxToken);
-		return false;
-	}
-	lyDestroyTensor(maxToken);
+	int32_t loc[] = {0};
+	lyTensorGetItem(&nextToken, maxToken, loc);
+	lyTensorDestroy(maxToken);
 
 	pResult->tokenId = nextToken;
+	printf("Next token: %d\n", nextToken);
 
 	if (nextToken == pInference->tokenizer->endOfSentenceId)
-	{
 		pResult->state = GSFinishedByReachingEOS;
-	}
 	else if (startPos + 1 >= pInference->sequenceLength)
-	{
 		pResult->state = GSFinishedByReachingSeqLen;
-	}
 	else
-	{
 		pResult->state = GSInProgress;
-	}
-
-	return true;
 }

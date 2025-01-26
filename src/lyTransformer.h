@@ -18,7 +18,7 @@ typedef struct lyTransformer
 	lyTensor* freqsCis;
 } lyTransformer;
 
-bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel);
-void lyDestroyTransformer(lyTransformer* pTransformer);
+void lyTransformerCreate(lyTransformer** ppTransformer, const lyModel* pModel);
+void lyTransformerDestroy(lyTransformer* pTransformer);
 
-bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos);
+void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos);

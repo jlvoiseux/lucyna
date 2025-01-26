@@ -4,45 +4,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-bool lyCreateRMSNorm(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights)
+void lyRMSNormCreate(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights)
 {
-	if (!ppNorm || !pWeights)
-	{
-		return false;
-	}
-
 	lyRMSNorm* pNorm = (lyRMSNorm*)malloc(sizeof(lyRMSNorm));
-	if (!pNorm)
-	{
-		return false;
-	}
 
 	pNorm->epsilon = epsilon;
 	pNorm->weights = pWeights;
 	*ppNorm		   = pNorm;
-
-	return true;
 }
 
-void lyDestroyRMSNorm(lyRMSNorm* pNorm)
+void lyRMSNormDestroy(lyRMSNorm* pNorm)
 {
 	if (!pNorm)
-	{
 		return;
-	}
 
 	free(pNorm);
 }
 
-bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pInput)
+void lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pInput)
 {
-	if (!ppOutput || !pNorm || !pInput || !pInput->data || !pNorm->weights || !pInput->rank)
-	{
-		return false;
-	}
-
 	lyTensor* pOutput;
-	lyCreateTensor(&pOutput, pInput->shape, pInput->rank, NULL, NULL);
+	lyTensorCreate(&pOutput, pInput->shape, pInput->rank, NULL, NULL);
 
 	int seqLen = pInput->shape[0];
 	int dim	   = pInput->shape[1];
@@ -68,5 +50,4 @@ bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pIn
 	}
 
 	*ppOutput = pOutput;
-	return true;
 }

@@ -7,14 +7,11 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
+void lyRopePrecomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 {
-	if (!ppOut || dim <= 0 || end <= 0 || theta <= 0)
-		return false;
-
 	lyTensor* freqs;
 	int32_t	  freqsShape[] = {dim / 2};
-	lyCreateTensor(&freqs, freqsShape, 1, NULL, NULL);
+	lyTensorCreate(&freqs, freqsShape, 1, NULL, NULL);
 
 	float dimFloat = (float)dim;
 	for (int idx = 0; idx < dim / 2; idx++)
@@ -43,8 +40,8 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 	}
 
 	lyTensor* out;
-	int32_t	  outShape[] = {end, dim / 2};
-	lyCreateTensor(&out, outShape, 2, NULL, NULL);
+	int32_t	  outShape[] = {end, dim};
+	lyTensorCreate(&out, outShape, 2, NULL, NULL);
 
 	for (int row = 0; row < end; row++)
 	{
@@ -59,21 +56,15 @@ bool precomputeFreqsCis(lyTensor** ppOut, int32_t dim, int32_t end, float theta)
 		}
 	}
 
-	lyDestroyTensor(freqs);
+	lyTensorDestroy(freqs);
 	*ppOut = out;
-	return true;
 }
 
-bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pXQ, lyTensor* pXK, lyTensor* pFreqsCis)
+void lyRopeApplyEmbeddings(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pXQ, lyTensor* pXK, lyTensor* pFreqsCis)
 {
-	if (!ppXQOut || !ppXKOut || !pXQ || !pXK || !pFreqsCis)
-	{
-		return false;
-	}
-
 	lyTensor *pXQOut, *pXKOut;
-	lyCreateTensor(&pXQOut, pXQ->shape, pXQ->rank, NULL, NULL);
-	lyCreateTensor(&pXKOut, pXK->shape, pXK->rank, NULL, NULL);
+	lyTensorCreate(&pXQOut, pXQ->shape, pXQ->rank, NULL, NULL);
+	lyTensorCreate(&pXKOut, pXK->shape, pXK->rank, NULL, NULL);
 
 	int batchSize  = pXQ->shape[0];
 	int headDim	   = pXQ->shape[1];
@@ -90,7 +81,7 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pX
 		nv_bfloat16 xk_imag = pXK->data[row * headDim + col + 1];
 
 		nv_bfloat16 cos_real = pFreqsCis->data[col / 2];
-		nv_bfloat16 sin_real = pFreqsCis->data[col / 2];
+		nv_bfloat16 sin_real = pFreqsCis->data[col / 2 + 1];
 
 		nv_bfloat16 xq_out_real = __hsub(__hmul(xq_real, cos_real), __hmul(xq_imag, sin_real));
 		nv_bfloat16 xq_out_imag = __hadd(__hmul(xq_real, sin_real), __hmul(xq_imag, cos_real));
@@ -105,5 +96,4 @@ bool lyApplyRotaryEmbedding(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pX
 
 	*ppXQOut = pXQOut;
 	*ppXKOut = pXKOut;
-	return true;
 }

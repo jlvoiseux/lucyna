@@ -4,51 +4,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool popMark(lyStack** ppItems, lyPickleReader* pReader)
+static void popMark(lyStack** ppItems, lyPickleReader* pReader)
 {
-	if (!ppItems || !pReader || !pReader->stack || !pReader->metastack)
-	{
-		return false;
-	}
-
 	*ppItems = pReader->stack;
 
 	lyValue* prevStackVal;
-	if (!lyStackPop(&prevStackVal, pReader->metastack))
-	{
-		return false;
-	}
+	lyStackPop(&prevStackVal, pReader->metastack);
 
 	void* prevStackPtr;
-	if (!lyGetPtrValue(prevStackVal, &prevStackPtr))
-	{
-		lyDestroyValue(prevStackVal);
-		return false;
-	}
-	lyDestroyValue(prevStackVal);
-
+	lyValueGetPtr(prevStackVal, &prevStackPtr);
+	lyValueDestroy(prevStackVal);
 	pReader->stack = (lyStack*)prevStackPtr;
-	return true;
 }
 
-bool lyCreatePickleReader(lyPickleReader** ppReader, const uint8_t* data, size_t size)
+void lyPickleCreateReader(lyPickleReader** ppReader, const uint8_t* data, size_t size)
 {
-	if (!ppReader || !data)
-	{
-		return false;
-	}
-
 	lyPickleReader* pReader = (lyPickleReader*)malloc(sizeof(lyPickleReader));
-	if (!pReader)
-	{
-		return false;
-	}
-
-	if (!lyCreateStack(&pReader->stack, 16) || !lyCreateStack(&pReader->metastack, 4) || !lyCreateDict(&pReader->memo, 32))
-	{
-		lyDestroyPickleReader(pReader);
-		return false;
-	}
+	lyStackCreate(&pReader->stack, 16);
+	lyStackCreate(&pReader->metastack, 4);
+	lyDictCreate(&pReader->memo, 32);
 
 	pReader->data			  = data;
 	pReader->size			  = size;
@@ -59,19 +33,13 @@ bool lyCreatePickleReader(lyPickleReader** ppReader, const uint8_t* data, size_t
 	pReader->context		  = NULL;
 
 	*ppReader = pReader;
-	return true;
 }
 
-void lyDestroyPickleReader(lyPickleReader* pReader)
+void lyPickleDestroyReader(lyPickleReader* pReader)
 {
-	if (!pReader)
-	{
-		return;
-	}
-
-	lyDestroyStack(pReader->stack);
-	lyDestroyStack(pReader->metastack);
-	lyDestroyDict(pReader->memo);
+	lyStackDestroy(pReader->stack);
+	lyStackDestroy(pReader->metastack);
+	lyDictDestroy(pReader->memo);
 	free(pReader);
 }
 
@@ -82,35 +50,22 @@ static uint8_t readByte(lyPickleReader* pReader)
 	return pReader->data[pReader->pos++];
 }
 
-static bool readUInt16(uint16_t* pValue, lyPickleReader* pReader)
+static void readUInt16(uint16_t* pValue, lyPickleReader* pReader)
 {
-	if (!pValue || !pReader)
-		return false;
-
 	*pValue = readByte(pReader);
 	*pValue |= (uint16_t)readByte(pReader) << 8;
-	return true;
 }
 
-static bool readUInt32(uint32_t* pValue, lyPickleReader* pReader)
+static void readUInt32(uint32_t* pValue, lyPickleReader* pReader)
 {
-	if (!pValue || !pReader)
-		return false;
-
 	*pValue = readByte(pReader);
 	*pValue |= (uint32_t)readByte(pReader) << 8;
 	*pValue |= (uint32_t)readByte(pReader) << 16;
 	*pValue |= (uint32_t)readByte(pReader) << 24;
-	return true;
 }
 
-static bool readLine(char** ppStr, lyPickleReader* pReader)
+static void readLine(char** ppStr, lyPickleReader* pReader)
 {
-	if (!ppStr || !pReader)
-	{
-		return false;
-	}
-
 	const uint8_t* start = pReader->data + pReader->pos;
 	const uint8_t* p	 = start;
 	while (p < pReader->data + pReader->size && *p != '\n')
@@ -120,109 +75,57 @@ static bool readLine(char** ppStr, lyPickleReader* pReader)
 
 	size_t len = p - start;
 	char*  str = (char*)malloc(len + 1);
-	if (!str)
-	{
-		return false;
-	}
-
 	memcpy(str, start, len);
 	str[len] = '\0';
 
 	pReader->pos += len + 1;
 	*ppStr = str;
-	return true;
 }
 
-static bool readString(char** ppStr, lyPickleReader* pReader, uint32_t length)
+static void readString(char** ppStr, lyPickleReader* pReader, uint32_t length)
 {
-	if (!ppStr || !pReader || pReader->pos + length > pReader->size)
-	{
-		return false;
-	}
-
 	char* str = (char*)malloc(length + 1);
-	if (!str)
-	{
-		return false;
-	}
-
 	memcpy(str, pReader->data + pReader->pos, length);
 	str[length] = '\0';
 
 	pReader->pos += length;
 	*ppStr = str;
-	return true;
 }
 
-static bool load_PROTO(lyPickleReader* pReader)
+static void load_PROTO(lyPickleReader* pReader)
 {
-	uint8_t proto = readByte(pReader);
-	if (proto > 5)
-		return false;
+	uint8_t proto  = readByte(pReader);
 	pReader->proto = proto;
-	return true;
 }
 
-static bool load_EMPTY_DICT(lyPickleReader* pReader)
+static void load_EMPTY_DICT(lyPickleReader* pReader)
 {
 	lyDict* dict;
-	if (!lyCreateDict(&dict, 8))
-	{
-		return false;
-	}
+	lyDictCreate(&dict, 8);
 
 	lyValue* value;
-	if (!lyCreatePtrValue(&value, dict))
-	{
-		lyDestroyDict(dict);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&value, dict);
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_MARK(lyPickleReader* pReader)
+static void load_MARK(lyPickleReader* pReader)
 {
 	lyStack* newStack;
-	if (!lyCreateStack(&newStack, 8))
-		return false;
+	lyStackCreate(&newStack, 8);
 
 	lyValue* stackValue;
-	if (!lyCreatePtrValue(&stackValue, pReader->stack))
-	{
-		lyDestroyStack(newStack);
-		return false;
-	}
+	lyValueCreatePtr(&stackValue, pReader->stack);
 
-	if (!lyStackPush(pReader->metastack, stackValue))
-	{
-		lyDestroyValue(stackValue);
-		lyDestroyStack(newStack);
-		return false;
-	}
-
+	lyStackPush(pReader->metastack, stackValue);
 	pReader->stack = newStack;
-	return true;
 }
 
-static bool load_GLOBAL(lyPickleReader* pReader)
+static void load_GLOBAL(lyPickleReader* pReader)
 {
 	char* module;
-	if (!readLine(&module, pReader))
-		return false;
-
 	char* name;
-	if (!readLine(&name, pReader))
-	{
-		free(module);
-		return false;
-	}
+	readLine(&module, pReader);
+	readLine(&name, pReader);
 
 	if (pReader->findClassFn)
 	{
@@ -230,48 +133,25 @@ static bool load_GLOBAL(lyPickleReader* pReader)
 		if (obj)
 		{
 			lyValue* value;
-			if (!lyCreatePtrValue(&value, obj))
-			{
-				free(module);
-				free(name);
-				return false;
-			}
-
-			if (!lyStackPush(pReader->stack, value))
-			{
-				lyDestroyValue(value);
-				free(module);
-				free(name);
-				return false;
-			}
+			lyValueCreatePtr(&value, obj);
+			lyStackPush(pReader->stack, value);
 		}
 	}
 
 	free(module);
 	free(name);
-	return true;
 }
 
-static bool load_REDUCE(lyPickleReader* pReader)
+static void load_REDUCE(lyPickleReader* pReader)
 {
 	lyValue* argsVal;
-	if (!lyStackPop(&argsVal, pReader->stack))
-		return false;
-
 	lyValue* funcVal;
-	if (!lyStackPop(&funcVal, pReader->stack))
-	{
-		lyDestroyValue(argsVal);
-		return false;
-	}
+	lyStackPop(&argsVal, pReader->stack);
+	lyStackPop(&funcVal, pReader->stack);
 
 	void *argsPtr, *funcPtr;
-	if (!lyGetPtrValue(argsVal, &argsPtr) || !lyGetPtrValue(funcVal, &funcPtr))
-	{
-		lyDestroyValue(argsVal);
-		lyDestroyValue(funcVal);
-		return false;
-	}
+	lyValueGetPtr(argsVal, &argsPtr);
+	lyValueGetPtr(funcVal, &funcPtr);
 
 	lyTorchTypeId funcType = (lyTorchTypeId)funcPtr;
 	lyStack*	  args	   = (lyStack*)argsPtr;
@@ -281,584 +161,275 @@ static bool load_REDUCE(lyPickleReader* pReader)
 	switch (LY_TORCH_ID_TO_TYPE(funcType))
 	{
 		case LY_TORCH_REBUILD_TENSOR:
-			if (!lyRebuildTensor(&pTensor, args->items, args->count))
-			{
-				lyDestroyValue(argsVal);
-				lyDestroyValue(funcVal);
-				return false;
-			}
+			lyTorchRebuildTensor(&pTensor, args->items, args->count);
 			result = pTensor;
 			break;
-
 		case LY_TORCH_ORDERED_DICT:
-			if (!lyCreateDict((lyDict**)&result, 8))
-			{
-				lyDestroyValue(argsVal);
-				lyDestroyValue(funcVal);
-				return false;
-			}
+			lyDictCreate((lyDict**)&result, 8);
 			break;
-
 		default:
-			lyDestroyValue(argsVal);
-			lyDestroyValue(funcVal);
-			return false;
+			lyValueDestroy(argsVal);
+			lyValueDestroy(funcVal);
+			return;
 	}
 
 	lyValue* resultValue;
-	if (!lyCreatePtrValue(&resultValue, result))
-	{
-		if (LY_TORCH_ID_TO_TYPE(funcType) == LY_TORCH_ORDERED_DICT)
-			lyDestroyDict((lyDict*)result);
-		else
-			lyDestroyTensor((lyTensor*)result);
-
-		lyDestroyValue(argsVal);
-		lyDestroyValue(funcVal);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, resultValue))
-	{
-		lyDestroyValue(resultValue);
-		lyDestroyValue(argsVal);
-		lyDestroyValue(funcVal);
-		return false;
-	}
-
-	lyDestroyValue(argsVal);
-	lyDestroyValue(funcVal);
-	return true;
+	lyValueCreatePtr(&resultValue, result);
+	lyStackPush(pReader->stack, resultValue);
+	lyValueDestroy(argsVal);
+	lyValueDestroy(funcVal);
 }
 
-static bool load_STOP(lyPickleReader* pReader)
+static void load_BINPERSID(lyPickleReader* pReader)
 {
-	return false;
-}
-
-static bool load_BINPERSID(lyPickleReader* pReader)
-{
-	lyValue* pidArrayVal;
-	if (!lyStackPop(&pidArrayVal, pReader->stack))
-		return false;
-
 	lyStack* pidArray;
-	if (!lyGetPtrValue(pidArrayVal, (void**)&pidArray))
-	{
-		lyDestroyValue(pidArrayVal);
-		return false;
-	}
+	lyValue* pidArrayVal;
+	lyStackPop(&pidArrayVal, pReader->stack);
+	lyValueGetPtr(pidArrayVal, (void**)&pidArray);
 
 	void* result = NULL;
 	if (pReader->persistentLoadFn)
 	{
 		result = pReader->persistentLoadFn(pReader, (void**)pidArray->items, pidArray->count);
 	}
-	lyDestroyValue(pidArrayVal);
-
-	if (!result)
-		return false;
+	lyValueDestroy(pidArrayVal);
 
 	lyValue* resultValue;
-	if (!lyCreatePtrValue(&resultValue, result))
-		return false;
-
-	if (!lyStackPush(pReader->stack, resultValue))
-	{
-		lyDestroyValue(resultValue);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&resultValue, result);
+	lyStackPush(pReader->stack, resultValue);
 }
 
-static bool load_BINUNICODE(lyPickleReader* pReader)
+static void load_BINUNICODE(lyPickleReader* pReader)
 {
 	uint32_t length;
-	if (!readUInt32(&length, pReader))
-		return false;
-
-	char* str;
-	if (!readString(&str, pReader, length))
-		return false;
-
+	char*	 str;
 	lyValue* value;
-	if (!lyCreatePtrValue(&value, str))
-	{
-		free(str);
-		return false;
-	}
 
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	readUInt32(&length, pReader);
+	readString(&str, pReader, length);
+	lyValueCreatePtr(&value, str);
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_BINPUT(lyPickleReader* pReader)
+static void load_BINPUT(lyPickleReader* pReader)
 {
 	uint8_t idx = readByte(pReader);
 
 	lyValue* value;
-	if (!lyStackPeek(&value, pReader->stack))
-		return false;
-
 	lyValue* valueCopy;
-	if (!lyCloneValue(&valueCopy, value))
-		return false;
+	char	 key[16];
 
-	char key[16];
+	lyStackPeek(&value, pReader->stack);
+	lyValueClone(&valueCopy, value);
 	snprintf(key, sizeof(key), "%d", idx);
-
-	if (!lyDictSetValue(pReader->memo, key, valueCopy))
-	{
-		lyDestroyValue(valueCopy);
-		return false;
-	}
-
-	return true;
+	lyDictSetValue(pReader->memo, key, valueCopy);
 }
 
-static bool load_LONG_BINPUT(lyPickleReader* pReader)
+static void load_LONG_BINPUT(lyPickleReader* pReader)
 {
 	uint32_t idx;
-	if (!readUInt32(&idx, pReader))
-		return false;
-
 	lyValue* value;
-	if (!lyStackPeek(&value, pReader->stack))
-		return false;
+	char	 key[16];
+
+	readUInt32(&idx, pReader);
+	lyStackPeek(&value, pReader->stack);
 
 	lyValue* valueCopy;
-	if (!lyCloneValue(&valueCopy, value))
-		return false;
-
-	char key[16];
+	lyValueClone(&valueCopy, value);
 	snprintf(key, sizeof(key), "%u", idx);
-
-	if (!lyDictSetValue(pReader->memo, key, valueCopy))
-	{
-		lyDestroyValue(valueCopy);
-		return false;
-	}
-
-	return true;
+	lyDictSetValue(pReader->memo, key, valueCopy);
 }
 
-static bool load_BINSTRING(lyPickleReader* pReader)
+static void load_BINSTRING(lyPickleReader* pReader)
 {
 	uint32_t length;
-	if (!readUInt32(&length, pReader))
-		return false;
+	char*	 str;
 
-	char* str;
-	if (!readString(&str, pReader, length))
-		return false;
+	readUInt32(&length, pReader);
+	readString(&str, pReader, length);
 
 	lyValue* value;
-	if (!lyCreatePtrValue(&value, str))
-	{
-		free(str);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&value, str);
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_SHORT_BINSTRING(lyPickleReader* pReader)
+static void load_SHORT_BINSTRING(lyPickleReader* pReader)
 {
-	uint8_t length = readByte(pReader);
-
-	char* str;
-	if (!readString(&str, pReader, length))
-		return false;
-
+	uint8_t	 length = readByte(pReader);
+	char*	 str;
 	lyValue* value;
-	if (!lyCreatePtrValue(&value, str))
-	{
-		free(str);
-		return false;
-	}
 
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	readString(&str, pReader, length);
+	lyValueCreatePtr(&value, str);
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_BININT(lyPickleReader* pReader)
+static void load_BININT(lyPickleReader* pReader)
 {
 	uint32_t value;
-	if (!readUInt32(&value, pReader))
-		return false;
-
 	lyValue* intValue;
-	if (!lyCreateIntValue(&intValue, (int32_t)value))
-		return false;
 
-	if (!lyStackPush(pReader->stack, intValue))
-	{
-		lyDestroyValue(intValue);
-		return false;
-	}
-
-	return true;
+	readUInt32(&value, pReader);
+	lyValueCreateInt(&intValue, (int32_t)value);
+	lyStackPush(pReader->stack, intValue);
 }
 
-static bool load_BININT1(lyPickleReader* pReader)
+static void load_BININT1(lyPickleReader* pReader)
 {
 	uint8_t val = readByte(pReader);
 
 	lyValue* value;
-	if (!lyCreateIntValue(&value, val))
-		return false;
-
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	lyValueCreateInt(&value, val);
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_BININT2(lyPickleReader* pReader)
+static void load_BININT2(lyPickleReader* pReader)
 {
 	uint16_t val;
-	if (!readUInt16(&val, pReader))
-		return false;
-
 	lyValue* value;
-	if (!lyCreateIntValue(&value, val))
-		return false;
 
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	readUInt16(&val, pReader);
+	lyValueCreateInt(&value, val);
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_BINGET(lyPickleReader* pReader)
+static void load_BINGET(lyPickleReader* pReader)
 {
 	uint8_t idx = readByte(pReader);
 
-	char key[16];
-	snprintf(key, sizeof(key), "%d", idx);
-
+	char	 key[16];
 	lyValue* value;
-	if (!lyDictGetValue(&value, pReader->memo, key))
-		return false;
-
 	lyValue* valueCopy;
-	if (!lyCloneValue(&valueCopy, value))
-		return false;
 
-	if (!lyStackPush(pReader->stack, valueCopy))
-	{
-		lyDestroyValue(valueCopy);
-		return false;
-	}
-
-	return true;
+	snprintf(key, sizeof(key), "%d", idx);
+	lyDictGetValue(&value, pReader->memo, key);
+	lyValueClone(&valueCopy, value);
+	lyStackPush(pReader->stack, valueCopy);
 }
 
-static bool load_TUPLE(lyPickleReader* pReader)
+static void load_TUPLE(lyPickleReader* pReader)
 {
 	lyStack* items;
-	if (!popMark(&items, pReader))
-		return false;
-
 	lyStack* tuple;
-	if (!lyCreateStack(&tuple, items->count))
-	{
-		lyDestroyStack(items);
-		return false;
-	}
+
+	popMark(&items, pReader);
+	lyStackCreate(&tuple, items->count);
 
 	for (size_t i = 0; i < items->count; i++)
 	{
 		lyValue* valueCopy;
-		if (!lyCloneValue(&valueCopy, items->items[i]))
-		{
-			lyDestroyStack(tuple);
-			lyDestroyStack(items);
-			return false;
-		}
-
-		if (!lyStackPush(tuple, valueCopy))
-		{
-			lyDestroyValue(valueCopy);
-			lyDestroyStack(tuple);
-			lyDestroyStack(items);
-			return false;
-		}
+		lyValueClone(&valueCopy, items->items[i]);
+		lyStackPush(tuple, valueCopy);
 	}
 
-	lyDestroyStack(items);
+	lyStackDestroy(items);
 
 	lyValue* tupleValue;
-	if (!lyCreatePtrValue(&tupleValue, tuple))
-	{
-		lyDestroyStack(tuple);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, tupleValue))
-	{
-		lyDestroyValue(tupleValue);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&tupleValue, tuple);
+	lyStackPush(pReader->stack, tupleValue);
 }
 
-static bool load_TUPLE1(lyPickleReader* pReader)
+static void load_TUPLE1(lyPickleReader* pReader)
 {
 	lyValue* val;
-	if (!lyStackPop(&val, pReader->stack))
-		return false;
+	lyStackPop(&val, pReader->stack);
 
 	lyStack* tuple;
-	if (!lyCreateStack(&tuple, 1))
-	{
-		lyDestroyValue(val);
-		return false;
-	}
-
-	if (!lyStackPush(tuple, val))
-	{
-		lyDestroyValue(val);
-		lyDestroyStack(tuple);
-		return false;
-	}
+	lyStackCreate(&tuple, 1);
+	lyStackPush(tuple, val);
 
 	lyValue* tupleValue;
-	if (!lyCreatePtrValue(&tupleValue, tuple))
-	{
-		lyDestroyStack(tuple);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, tupleValue))
-	{
-		lyDestroyValue(tupleValue);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&tupleValue, tuple);
+	lyStackPush(pReader->stack, tupleValue);
 }
 
-static bool load_TUPLE2(lyPickleReader* pReader)
+static void load_TUPLE2(lyPickleReader* pReader)
 {
 	lyValue* val2;
-	if (!lyStackPop(&val2, pReader->stack))
-		return false;
-
 	lyValue* val1;
-	if (!lyStackPop(&val1, pReader->stack))
-	{
-		lyDestroyValue(val2);
-		return false;
-	}
+	lyStackPop(&val2, pReader->stack);
+	lyStackPop(&val1, pReader->stack);
 
 	lyStack* tuple;
-	if (!lyCreateStack(&tuple, 2))
-	{
-		lyDestroyValue(val1);
-		lyDestroyValue(val2);
-		return false;
-	}
-
-	if (!lyStackPush(tuple, val1) || !lyStackPush(tuple, val2))
-	{
-		lyDestroyValue(val1);
-		lyDestroyValue(val2);
-		lyDestroyStack(tuple);
-		return false;
-	}
+	lyStackCreate(&tuple, 2);
+	lyStackPush(tuple, val1);
+	lyStackPush(tuple, val2);
 
 	lyValue* tupleValue;
-	if (!lyCreatePtrValue(&tupleValue, tuple))
-	{
-		lyDestroyStack(tuple);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, tupleValue))
-	{
-		lyDestroyValue(tupleValue);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&tupleValue, tuple);
+	lyStackPush(pReader->stack, tupleValue);
 }
 
-static bool load_TUPLE3(lyPickleReader* pReader)
+static void load_TUPLE3(lyPickleReader* pReader)
 {
 	lyValue* val3;
-	if (!lyStackPop(&val3, pReader->stack))
-		return false;
-
 	lyValue* val2;
-	if (!lyStackPop(&val2, pReader->stack))
-	{
-		lyDestroyValue(val3);
-		return false;
-	}
-
 	lyValue* val1;
-	if (!lyStackPop(&val1, pReader->stack))
-	{
-		lyDestroyValue(val2);
-		lyDestroyValue(val3);
-		return false;
-	}
+	lyStackPop(&val3, pReader->stack);
+	lyStackPop(&val2, pReader->stack);
+	lyStackPop(&val1, pReader->stack);
 
 	lyStack* tuple;
-	if (!lyCreateStack(&tuple, 3))
-	{
-		lyDestroyValue(val1);
-		lyDestroyValue(val2);
-		lyDestroyValue(val3);
-		return false;
-	}
-
-	if (!lyStackPush(tuple, val1) || !lyStackPush(tuple, val2) || !lyStackPush(tuple, val3))
-	{
-		lyDestroyValue(val1);
-		lyDestroyValue(val2);
-		lyDestroyValue(val3);
-		lyDestroyStack(tuple);
-		return false;
-	}
+	lyStackCreate(&tuple, 3);
+	lyStackPush(tuple, val1);
+	lyStackPush(tuple, val2);
+	lyStackPush(tuple, val3);
 
 	lyValue* tupleValue;
-	if (!lyCreatePtrValue(&tupleValue, tuple))
-	{
-		lyDestroyStack(tuple);
-		return false;
-	}
-
-	if (!lyStackPush(pReader->stack, tupleValue))
-	{
-		lyDestroyValue(tupleValue);
-		return false;
-	}
-
-	return true;
+	lyValueCreatePtr(&tupleValue, tuple);
+	lyStackPush(pReader->stack, tupleValue);
 }
 
-static bool load_EMPTY_TUPLE(lyPickleReader* pReader)
+static void load_EMPTY_TUPLE(lyPickleReader* pReader)
 {
 	lyStack* tuple;
-	if (!lyCreateStack(&tuple, 1))
-		return false;
+	lyStackCreate(&tuple, 1);
 
 	lyValue* tupleValue;
-	if (!lyCreatePtrValue(&tupleValue, tuple))
-	{
-		lyDestroyStack(tuple);
-		return false;
-	}
+	lyValueCreatePtr(&tupleValue, tuple);
 
-	if (!lyStackPush(pReader->stack, tupleValue))
-	{
-		lyDestroyValue(tupleValue);
-		return false;
-	}
-
-	return true;
+	lyStackPush(pReader->stack, tupleValue);
 }
 
-static bool load_NEWTRUE(lyPickleReader* pReader)
+static void load_NEWTRUE(lyPickleReader* pReader)
 {
 	lyValue* value;
-	if (!lyCreateBoolValue(&value, true))
-		return false;
+	lyValueCreateBool(&value, true);
 
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_NEWFALSE(lyPickleReader* pReader)
+static void load_NEWFALSE(lyPickleReader* pReader)
 {
 	lyValue* value;
-	if (!lyCreateBoolValue(&value, false))
-		return false;
+	lyValueCreateBool(&value, false);
 
-	if (!lyStackPush(pReader->stack, value))
-	{
-		lyDestroyValue(value);
-		return false;
-	}
-
-	return true;
+	lyStackPush(pReader->stack, value);
 }
 
-static bool load_SETITEMS(lyPickleReader* pReader)
+static void load_SETITEMS(lyPickleReader* pReader)
 {
 	lyStack* items;
-	if (!popMark(&items, pReader))
-		return false;
-
 	lyValue* dictVal;
-	if (!lyStackPeek(&dictVal, pReader->stack))
-	{
-		lyDestroyStack(items);
-		return false;
-	}
+	void*	 dictPtr;
 
-	void* dictPtr;
-	if (!lyGetPtrValue(dictVal, &dictPtr))
-	{
-		lyDestroyStack(items);
-		return false;
-	}
-
+	popMark(&items, pReader);
+	lyStackPeek(&dictVal, pReader->stack);
+	lyValueGetPtr(dictVal, &dictPtr);
 	lyDict* dict = (lyDict*)dictPtr;
 
 	for (size_t i = 0; i < items->count; i += 2)
 	{
 		void* keyPtr;
-		if (!lyGetPtrValue(items->items[i], &keyPtr))
-		{
-			lyDestroyStack(items);
-			return false;
-		}
+		lyValueGetPtr(items->items[i], &keyPtr);
+		lyDictSetValue(dict, (const char*)keyPtr, items->items[i + 1]);
 
-		if (!lyDictSetValue(dict, (const char*)keyPtr, items->items[i + 1]))
-		{
-			lyDestroyStack(items);
-			return false;
-		}
-
-		items->items[i + 1] = NULL;	 // Ownership transferred
-		lyDestroyValue(items->items[i]);
+		items->items[i + 1] = NULL;
+		lyValueDestroy(items->items[i]);
 		items->items[i] = NULL;
 	}
 
-	lyDestroyStack(items);
-	return true;
+	lyStackDestroy(items);
 }
 
 static bool dispatch(lyPickleReader* pReader, uint8_t opcode)
@@ -866,13 +437,12 @@ static bool dispatch(lyPickleReader* pReader, uint8_t opcode)
 	static const struct
 	{
 		uint8_t opcode;
-		bool (*handler)(lyPickleReader*);
+		void (*handler)(lyPickleReader*);
 	} DISPATCH_TABLE[] = {{LY_PROTO, load_PROTO},
 						  {LY_EMPTY_DICT, load_EMPTY_DICT},
 						  {LY_MARK, load_MARK},
 						  {LY_GLOBAL, load_GLOBAL},
 						  {LY_REDUCE, load_REDUCE},
-						  {LY_STOP, load_STOP},
 						  {LY_BINPERSID, load_BINPERSID},
 						  {LY_BINUNICODE, load_BINUNICODE},
 						  {LY_BINPUT, load_BINPUT},
@@ -896,16 +466,16 @@ static bool dispatch(lyPickleReader* pReader, uint8_t opcode)
 	for (size_t i = 0; DISPATCH_TABLE[i].handler != NULL; i++)
 	{
 		if (DISPATCH_TABLE[i].opcode == opcode)
-			return DISPATCH_TABLE[i].handler(pReader);
+		{
+			DISPATCH_TABLE[i].handler(pReader);
+			return true;
+		}
 	}
 	return false;
 }
 
-bool lyLoadPickle(lyDict** ppDict, lyPickleReader* pReader)
+void lyPickleLoad(lyDict** ppDict, lyPickleReader* pReader)
 {
-	if (!ppDict || !pReader)
-		return false;
-
 	while (pReader->pos < pReader->size)
 	{
 		uint8_t opcode = readByte(pReader);
@@ -914,22 +484,14 @@ bool lyLoadPickle(lyDict** ppDict, lyPickleReader* pReader)
 			if (opcode == LY_STOP)
 			{
 				lyValue* val;
-				if (!lyStackPop(&val, pReader->stack))
-					return false;
+				void*	 dictPtr;
 
-				void* dictPtr;
-				if (!lyGetPtrValue(val, &dictPtr))
-				{
-					lyDestroyValue(val);
-					return false;
-				}
+				lyStackPop(&val, pReader->stack);
+				lyValueGetPtr(val, &dictPtr);
 
 				*ppDict = (lyDict*)dictPtr;
-				lyDestroyValue(val);
-				return true;
+				lyValueDestroy(val);
 			}
-			return false;
 		}
 	}
-	return false;
 }

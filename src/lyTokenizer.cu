@@ -1,331 +1,515 @@
 #include "lyTokenizer.h"
+#include "lyUtil.h"
+#include "lyVocabulary.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static const char* CONTRACTIONS[] = {"'s", "'t", "'re", "'ve", "'m", "'ll", "'d"};
-#define NUM_CONTRACTIONS (sizeof(CONTRACTIONS) / sizeof(char*))
+static const char* SPLIT_REGEX = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+";
 
-bool addToken(int32_t** ppTokenIds, int32_t* pTokenCount, int32_t tokenId)
+static const char* SPECIAL_TOKENS[] = {"<|begin_of_text|>", "<|end_of_text|>", "<|reserved_special_token_0|>", "<|reserved_special_token_1|>", "<|finetune_right_pad_id|>", "<|step_id|>", "<|start_header_id|>", "<|end_header_id|>", "<|eom_id|>", "<|eot_id|>", "<|python_tag|>"};
+
+static const char* B_TXT	= "<|begin_of_text|>";
+static const char* B_HEADER = "<|start_header_id|>";
+static const char* E_HEADER = "<|end_header_id|>";
+static const char* E_TURN	= "<|eot_id|>";
+
+#define NUM_SPECIAL_TOKENS (sizeof(SPECIAL_TOKENS) / sizeof(SPECIAL_TOKENS[0]))
+#define RESERVED_SPECIAL_TOKENS_COUNT 256
+
+typedef struct
 {
-	int32_t* newTokens = (int32_t*)realloc(*ppTokenIds, (*pTokenCount + 1) * sizeof(int32_t));
-	if (!newTokens)
+	char*  bytes;
+	size_t len;
+} ByteSlice;
+
+static void loadVocabulary(lyTokenizer* pTokenizer, const char* vocabPath)
+{
+	FILE* fp = fopen(vocabPath, "r");
+	if (!fp)
 	{
-		return false;
+		fprintf(stderr, "Failed to open vocabulary file: %s\n", vocabPath);
+		return;
 	}
-	*ppTokenIds					= newTokens;
-	(*ppTokenIds)[*pTokenCount] = tokenId;
-	(*pTokenCount)++;
-	return true;
+
+	lyVocabulary* pVocab;
+	lyVocabularyCreate(&pVocab);
+
+	char line[1024];
+	while (fgets(line, sizeof(line), fp))
+	{
+		char* token	  = strtok(line, " ");
+		char* rankStr = strtok(NULL, " \n");
+		if (!token || !rankStr)
+			continue;
+
+		size_t		   outLen;
+		unsigned char* decodedToken = lyBase64Decode(token, strlen(token), &outLen);
+		int32_t		   rank			= atoi(rankStr);
+
+		lyVocabularyAddEntry(pVocab, (const char*)decodedToken, rank);
+		free(decodedToken);
+	}
+
+	pTokenizer->vocabSize = pVocab->count;
+	pTokenizer->idToToken = (char**)malloc(sizeof(char*) * pVocab->count);
+	pTokenizer->tokenToId = (int32_t*)malloc(sizeof(int32_t) * pVocab->count);
+
+	for (size_t i = 0; i < pVocab->count; i++)
+	{
+		pTokenizer->idToToken[i] = strdup(pVocab->entries[i].token);
+		pTokenizer->tokenToId[i] = pVocab->entries[i].rank;
+	}
+
+	lyVocabularyDestroy(pVocab);
+	fclose(fp);
 }
 
-bool findToken(int32_t* pTokenId, const lyTokenizer* pTokenizer, const char* piece)
+static void bytePairMerge(int32_t** ppTokens, size_t* pTokenCount, const char* piece, const lyTokenizer* pTokenizer)
 {
-	for (int32_t i = 0; i < pTokenizer->tokenCount; i++)
+	typedef struct
 	{
-		if (strcmp(pTokenizer->tokens[i].piece, piece) == 0)
-		{
-			*pTokenId = pTokenizer->tokens[i].rank;
-			return true;
-		}
-	}
-	return false;
-}
+		int32_t rank;
+		size_t	idx;
+	} RankTuple;
 
-static bool isContraction(const char* text)
-{
-	for (size_t i = 0; i < NUM_CONTRACTIONS; i++)
+	size_t	   pieceLen = strlen(piece);
+	RankTuple* parts	= (RankTuple*)malloc(sizeof(RankTuple) * (pieceLen + 1));
+	RankTuple  minRank	= {INT32_MAX, SIZE_MAX};
+
+	for (size_t i = 0; i < pieceLen - 1; i++)
 	{
-		if (strncmp(text, CONTRACTIONS[i], strlen(CONTRACTIONS[i])) == 0)
+		char	pair[3] = {piece[i], piece[i + 1], '\0'};
+		int32_t rank	= INT32_MAX;
+
+		for (size_t j = 0; j < pTokenizer->vocabSize; j++)
 		{
-			return true;
-		}
-	}
-	return false;
-}
-
-static bool isLetter(char c)
-{
-	return isalpha(c);
-}
-
-static bool isNumber(char c)
-{
-	return isdigit(c);
-}
-
-static size_t getNextToken(const char* text, char* token, size_t maxTokenLen)
-{
-	size_t pos		= 0;
-	size_t tokenLen = 0;
-
-	if (text[pos] == '\'' && isContraction(text + pos))
-	{
-		const char* space		   = strchr(text + pos, ' ');
-		size_t		contractionLen = space ? (size_t)(space - (text + pos)) : strlen(text + pos);
-		strncpy(token, text + pos, contractionLen);
-		token[contractionLen] = '\0';
-		return contractionLen;
-	}
-
-	if (isNumber(text[pos]))
-	{
-		while (pos < 3 && text[pos] && isNumber(text[pos]))
-		{
-			token[tokenLen++] = text[pos++];
-		}
-		token[tokenLen] = '\0';
-		return pos;
-	}
-
-	if (isLetter(text[pos]))
-	{
-		if (pos == 0 && text[pos + 1] && isLetter(text[pos + 1]) && !isLetter(text[pos]) && !isNumber(text[pos]))
-		{
-			token[tokenLen++] = text[pos++];
-		}
-
-		while (text[pos] && isLetter(text[pos]))
-		{
-			token[tokenLen++] = text[pos++];
-		}
-		token[tokenLen] = '\0';
-		return pos;
-	}
-
-	if (isspace(text[pos]))
-	{
-		if (text[pos] == '\n' || text[pos] == '\r')
-		{
-			while (text[pos] && (text[pos] == '\n' || text[pos] == '\r'))
+			if (strcmp(pTokenizer->idToToken[j], pair) == 0)
 			{
-				token[tokenLen++] = text[pos++];
+				rank = pTokenizer->tokenToId[j];
+				break;
 			}
 		}
-		else
+
+		if (rank < minRank.rank)
 		{
-			while (text[pos] && isspace(text[pos]) && text[pos] != '\n' && text[pos] != '\r')
+			minRank.rank = rank;
+			minRank.idx	 = i;
+		}
+		parts[i].rank = rank;
+		parts[i].idx  = i;
+	}
+	parts[pieceLen - 1].rank = INT32_MAX;
+	parts[pieceLen - 1].idx	 = pieceLen - 1;
+	parts[pieceLen].rank	 = INT32_MAX;
+	parts[pieceLen].idx		 = pieceLen;
+
+	size_t partCount = pieceLen + 1;
+	while (minRank.rank != INT32_MAX && partCount > 1)
+	{
+		size_t i = minRank.idx;
+
+		if (i > 0)
+		{
+			char merge[4];
+			strncpy(merge, piece + parts[i - 1].idx, parts[i + 2].idx - parts[i - 1].idx);
+			merge[parts[i + 2].idx - parts[i - 1].idx] = '\0';
+
+			int32_t newRank = INT32_MAX;
+			for (size_t j = 0; j < pTokenizer->vocabSize; j++)
 			{
-				token[tokenLen++] = text[pos++];
+				if (strcmp(pTokenizer->idToToken[j], merge) == 0)
+				{
+					newRank = pTokenizer->tokenToId[j];
+					break;
+				}
+			}
+			parts[i - 1].rank = newRank;
+		}
+
+		memmove(&parts[i + 1], &parts[i + 2], sizeof(RankTuple) * (partCount - i - 2));
+		partCount--;
+
+		minRank.rank = INT32_MAX;
+		minRank.idx	 = SIZE_MAX;
+		for (size_t j = 0; j < partCount - 1; j++)
+		{
+			if (parts[j].rank < minRank.rank)
+			{
+				minRank.rank = parts[j].rank;
+				minRank.idx	 = j;
 			}
 		}
-		token[tokenLen] = '\0';
-		return pos;
 	}
 
-	if (text[pos])
+	*pTokenCount = partCount - 1;
+	*ppTokens	 = (int32_t*)malloc(sizeof(int32_t) * *pTokenCount);
+
+	for (size_t i = 0; i < *pTokenCount; i++)
 	{
-		if (isspace(text[pos]))
-		{
-			token[tokenLen++] = text[pos++];
-		}
+		char   subpiece[1024];
+		size_t len = parts[i + 1].idx - parts[i].idx;
+		strncpy(subpiece, piece + parts[i].idx, len);
+		subpiece[len] = '\0';
 
-		while (text[pos] && !isspace(text[pos]) && !isLetter(text[pos]) && !isNumber(text[pos]))
+		for (size_t j = 0; j < pTokenizer->vocabSize; j++)
 		{
-			token[tokenLen++] = text[pos++];
+			if (strcmp(pTokenizer->idToToken[j], subpiece) == 0)
+			{
+				(*ppTokens)[i] = pTokenizer->tokenToId[j];
+				break;
+			}
 		}
-
-		while (text[pos] && (text[pos] == '\n' || text[pos] == '\r'))
-		{
-			token[tokenLen++] = text[pos++];
-		}
-
-		token[tokenLen] = '\0';
-		return pos;
 	}
 
-	return 0;
+	free(parts);
 }
 
-bool lyTokenizeText(int32_t** ppTokenIds, int32_t* pTokenCount, const lyTokenizer* pTokenizer, const char* text, bool addBeginOfSentence)
+void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath)
 {
-	if (!ppTokenIds || !pTokenCount || !pTokenizer || !text)
+	lyTokenizer* pTokenizer = (lyTokenizer*)malloc(sizeof(lyTokenizer));
+	memset(pTokenizer, 0, sizeof(lyTokenizer));
+
+	// Compile regex
+	int		   errorcode;
+	PCRE2_SIZE erroroffset;
+	pTokenizer->splitRegex = pcre2_compile((PCRE2_SPTR) "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+", PCRE2_ZERO_TERMINATED, PCRE2_UTF | PCRE2_UCP, &errorcode, &erroroffset, NULL);
+
+	// Load base vocabulary
+	char vocabPath[1024];
+#ifdef _WIN32
+	sprintf_s(vocabPath, sizeof(vocabPath), "%s\\tokenizer.model", modelFolderPath);
+#else
+	snprintf(vocabPath, sizeof(vocabPath), "%s/tokenizer.model", modelFolderPath);
+#endif
+	FILE* fp = fopen(vocabPath, "r");
+	if (!fp)
 	{
-		return false;
+		fprintf(stderr, "Failed to open vocabulary file: %s\n", vocabPath);
+		return;
 	}
 
-	*ppTokenIds	 = NULL;
-	*pTokenCount = 0;
-
-	if (addBeginOfSentence && pTokenizer->beginOfSentenceId >= 0)
+	// Count lines to determine vocabulary size
+	size_t baseVocabSize = 0;
+	char   line[1024];
+	while (fgets(line, sizeof(line), fp))
 	{
-		if (!addToken(ppTokenIds, pTokenCount, pTokenizer->beginOfSentenceId))
+		baseVocabSize++;
+	}
+	rewind(fp);
+
+	// Allocate vocabulary arrays
+	size_t totalVocabSize = baseVocabSize + RESERVED_SPECIAL_TOKENS_COUNT;
+	pTokenizer->idToToken = (char**)malloc(totalVocabSize * sizeof(char*));
+	pTokenizer->tokenToId = (int32_t*)malloc(totalVocabSize * sizeof(int32_t));
+	pTokenizer->vocabSize = totalVocabSize;
+
+	// Load base vocabulary
+	size_t idx = 0;
+	while (fgets(line, sizeof(line), fp))
+	{
+		char* token	  = strtok(line, " ");
+		char* rankStr = strtok(NULL, " \n");
+		if (!token || !rankStr)
+			continue;
+
+		size_t		   outLen;
+		unsigned char* decodedToken = lyBase64Decode(token, strlen(token), &outLen);
+		int32_t		   rank			= atoi(rankStr);
+
+		pTokenizer->idToToken[idx] = (char*)malloc(outLen + 1);
+		memcpy(pTokenizer->idToToken[idx], decodedToken, outLen);
+		pTokenizer->idToToken[idx][outLen] = '\0';
+		pTokenizer->tokenToId[idx]		   = rank;
+
+		free(decodedToken);
+		idx++;
+	}
+	fclose(fp);
+
+	size_t specialTokenBaseIdx = baseVocabSize;
+	for (size_t i = 0; i < NUM_SPECIAL_TOKENS; i++)
+	{
+		pTokenizer->idToToken[specialTokenBaseIdx + i] = strdup(SPECIAL_TOKENS[i]);
+		pTokenizer->tokenToId[specialTokenBaseIdx + i] = specialTokenBaseIdx + i;
+	}
+
+	// Add remaining reserved tokens
+	for (size_t i = NUM_SPECIAL_TOKENS; i < RESERVED_SPECIAL_TOKENS_COUNT; i++)
+	{
+		char reserved[64];
+		snprintf(reserved, sizeof(reserved), "<|reserved_special_token_%zu|>", i + 2);
+		pTokenizer->idToToken[specialTokenBaseIdx + i] = strdup(reserved);
+		pTokenizer->tokenToId[specialTokenBaseIdx + i] = specialTokenBaseIdx + i;
+	}
+
+	pTokenizer->beginOfSentenceId = specialTokenBaseIdx;	  // <|begin_of_text|>
+	pTokenizer->endOfSentenceId	  = specialTokenBaseIdx + 1;  // <|end_of_text|>
+	pTokenizer->padId			  = -1;
+	pTokenizer->unknownId		  = -1;
+
+	pTokenizer->stopTokenCount	= 2;
+	pTokenizer->stopTokenIds	= (int32_t*)malloc(sizeof(int32_t) * pTokenizer->stopTokenCount);
+	pTokenizer->stopTokenIds[0] = specialTokenBaseIdx + 8;	// <|eom_id|>
+	pTokenizer->stopTokenIds[1] = specialTokenBaseIdx + 9;	// <|eot_id|>
+
+	*ppTokenizer = pTokenizer;
+}
+
+void lyTokenizerDestroy(lyTokenizer* pTokenizer)
+{
+	if (!pTokenizer)
+		return;
+
+	pcre2_code_free(pTokenizer->splitRegex);
+
+	for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+	{
+		free(pTokenizer->idToToken[i]);
+	}
+	free(pTokenizer->idToToken);
+	free(pTokenizer->tokenToId);
+	free(pTokenizer->stopTokenIds);
+	free(pTokenizer);
+}
+
+void lyTokenizerTokenize(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* text, bool addBeginOfSentence)
+{
+	size_t maxTokens = strlen(text) * 2;  // Conservative estimate
+	*ppTokens		 = (int32_t*)malloc(sizeof(int32_t) * maxTokens);
+	*pTokenCount	 = 0;
+
+	if (addBeginOfSentence && pTokenizer->beginOfSentenceId != -1)
+	{
+		(*ppTokens)[(*pTokenCount)++] = pTokenizer->beginOfSentenceId;
+	}
+
+	pcre2_match_data* match_data = pcre2_match_data_create_from_pattern(pTokenizer->splitRegex, NULL);
+
+	int	   rc;
+	size_t offset = 0;
+	while ((rc = pcre2_match(pTokenizer->splitRegex, (PCRE2_SPTR)text, strlen(text), offset, 0, match_data, NULL)) > 0)
+	{
+		PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
+
+		size_t matchLen = ovector[1] - ovector[0];
+		char*  match	= (char*)malloc(matchLen + 1);
+		memcpy(match, text + ovector[0], matchLen);
+		match[matchLen] = '\0';
+
+		bool found = false;
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
 		{
-			return false;
+			if (strcmp(pTokenizer->idToToken[i], match) == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				found						  = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			int32_t* mergeTokens;
+			size_t	 mergeCount;
+			bytePairMerge(&mergeTokens, &mergeCount, match, pTokenizer);
+
+			memcpy(*ppTokens + *pTokenCount, mergeTokens, mergeCount * sizeof(int32_t));
+			*pTokenCount += mergeCount;
+
+			free(mergeTokens);
+		}
+
+		free(match);
+		offset = ovector[1];
+	}
+
+	pcre2_match_data_free(match_data);
+
+	*ppTokens = (int32_t*)realloc(*ppTokens, sizeof(int32_t) * *pTokenCount);
+}
+
+void lyTokenizerTokenizePrompt(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt)
+{
+	size_t maxTokens = (systemPrompt ? strlen(systemPrompt) : 0) + (userPrompt ? strlen(userPrompt) : 0) * 2;
+	*ppTokens		 = (int32_t*)malloc(sizeof(int32_t) * maxTokens);
+	*pTokenCount	 = 0;
+
+	// Add <|begin_of_text|>
+	(*ppTokens)[(*pTokenCount)++] = pTokenizer->beginOfSentenceId;
+
+	// Add system message if present
+	if (systemPrompt)
+	{
+		// Add system header
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+		{
+			if (strcmp(pTokenizer->idToToken[i], "<|start_header_id|>") == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				break;
+			}
+		}
+
+		int32_t* tokens;
+		size_t	 tokenCount;
+		lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, "system", false);
+		memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+		*pTokenCount += tokenCount;
+		free(tokens);
+
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+		{
+			if (strcmp(pTokenizer->idToToken[i], "<|end_header_id|>") == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				break;
+			}
+		}
+
+		// Add newlines
+		lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, "\n\n", false);
+		memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+		*pTokenCount += tokenCount;
+		free(tokens);
+
+		// Add system content
+		lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, systemPrompt, false);
+		memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+		*pTokenCount += tokenCount;
+		free(tokens);
+
+		// Add end of turn
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+		{
+			if (strcmp(pTokenizer->idToToken[i], "<|eot_id|>") == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				break;
+			}
 		}
 	}
 
-	const char* p = text;
-	char		token[1024];
-
-	while (*p)
+	// Add user message if present
+	if (userPrompt)
 	{
-		size_t advance = getNextToken(p, token, sizeof(token));
-		if (advance == 0)
+		// Add user header
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+		{
+			if (strcmp(pTokenizer->idToToken[i], "<|start_header_id|>") == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				break;
+			}
+		}
+
+		int32_t* tokens;
+		size_t	 tokenCount;
+		lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, "user", false);
+		memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+		*pTokenCount += tokenCount;
+		free(tokens);
+
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+		{
+			if (strcmp(pTokenizer->idToToken[i], "<|end_header_id|>") == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				break;
+			}
+		}
+
+		lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, "\n\n", false);
+		memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+		*pTokenCount += tokenCount;
+		free(tokens);
+
+		// Add user content
+		lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, userPrompt, false);
+		memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+		*pTokenCount += tokenCount;
+		free(tokens);
+
+		// Add end of turn
+		for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+		{
+			if (strcmp(pTokenizer->idToToken[i], "<|eot_id|>") == 0)
+			{
+				(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+				break;
+			}
+		}
+	}
+
+	// Add assistant header
+	for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+	{
+		if (strcmp(pTokenizer->idToToken[i], "<|start_header_id|>") == 0)
+		{
+			(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
 			break;
-
-		int32_t tokenId;
-		if (findToken(&tokenId, pTokenizer, token))
-		{
-			if (!addToken(ppTokenIds, pTokenCount, tokenId))
-			{
-				free(*ppTokenIds);
-				return false;
-			}
 		}
-		else if (pTokenizer->unknownId >= 0)
-		{
-			if (!addToken(ppTokenIds, pTokenCount, pTokenizer->unknownId))
-			{
-				free(*ppTokenIds);
-				return false;
-			}
-		}
-
-		p += advance;
 	}
 
-	return true;
+	int32_t* tokens;
+	size_t	 tokenCount;
+	lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, "assistant", false);
+	memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+	*pTokenCount += tokenCount;
+	free(tokens);
+
+	for (size_t i = 0; i < pTokenizer->vocabSize; i++)
+	{
+		if (strcmp(pTokenizer->idToToken[i], "<|end_header_id|>") == 0)
+		{
+			(*ppTokens)[(*pTokenCount)++] = pTokenizer->tokenToId[i];
+			break;
+		}
+	}
+
+	lyTokenizerTokenize(&tokens, &tokenCount, pTokenizer, "\n\n", false);
+	memcpy(*ppTokens + *pTokenCount, tokens, tokenCount * sizeof(int32_t));
+	*pTokenCount += tokenCount;
+	free(tokens);
+
+	*ppTokens = (int32_t*)realloc(*ppTokens, sizeof(int32_t) * *pTokenCount);
 }
 
-bool lyTokenizePrompt(int32_t** ppTokenIds, int32_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt)
+void lyTokenizerDecodeToken(char** ppStr, const lyTokenizer* pTokenizer, int32_t tokenId)
 {
-	if (!ppTokenIds || !pTokenCount || !pTokenizer || !userPrompt)
+	if (tokenId < 0 || tokenId >= (int32_t)pTokenizer->vocabSize)
 	{
-		return false;
+		*ppStr = strdup("<UNKNOWN>");
+		return;
 	}
 
-	*ppTokenIds	 = NULL;
-	*pTokenCount = 0;
-
-	// Format: <|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{systemPrompt}<|eot_id|><|end_of_text|>
-	//         <|start_header_id|>user<|end_header_id|>\n\n{userPrompt}<|eot_id|><|end_of_text|>
-	//         <|start_header_id|>assistant<|end_header_id|>\n\n<|end_of_text|>
-
-	if (!addToken(ppTokenIds, pTokenCount, pTokenizer->beginOfSentenceId))
-	{
-		return false;
-	}
-
-	int32_t startHeaderId, endHeaderId, eotId;
-	if (!findToken(&startHeaderId, pTokenizer, "<|start_header_id|>") || !findToken(&endHeaderId, pTokenizer, "<|end_header_id|>") || !findToken(&eotId, pTokenizer, "<|eot_id|>"))
-	{
-		free(*ppTokenIds);
-		return false;
-	}
-
-	if (systemPrompt && *systemPrompt)
-	{
-		if (!addToken(ppTokenIds, pTokenCount, startHeaderId) || !addToken(ppTokenIds, pTokenCount, endHeaderId))
-		{
-			free(*ppTokenIds);
-			return false;
-		}
-
-		int32_t* systemTokens	  = NULL;
-		int32_t	 systemTokenCount = 0;
-		if (!lyTokenizeText(&systemTokens, &systemTokenCount, pTokenizer, systemPrompt, false))
-		{
-			free(*ppTokenIds);
-			return false;
-		}
-
-		for (int32_t i = 0; i < systemTokenCount; i++)
-		{
-			if (!addToken(ppTokenIds, pTokenCount, systemTokens[i]))
-			{
-				free(systemTokens);
-				free(*ppTokenIds);
-				return false;
-			}
-		}
-		free(systemTokens);
-
-		if (!addToken(ppTokenIds, pTokenCount, eotId) || !addToken(ppTokenIds, pTokenCount, pTokenizer->endOfSentenceId))
-		{
-			free(*ppTokenIds);
-			return false;
-		}
-	}
-
-	if (!addToken(ppTokenIds, pTokenCount, startHeaderId) || !addToken(ppTokenIds, pTokenCount, endHeaderId))
-	{
-		free(*ppTokenIds);
-		return false;
-	}
-
-	int32_t* userTokens		= NULL;
-	int32_t	 userTokenCount = 0;
-	if (!lyTokenizeText(&userTokens, &userTokenCount, pTokenizer, userPrompt, false))
-	{
-		free(*ppTokenIds);
-		return false;
-	}
-
-	for (int32_t i = 0; i < userTokenCount; i++)
-	{
-		if (!addToken(ppTokenIds, pTokenCount, userTokens[i]))
-		{
-			free(userTokens);
-			free(*ppTokenIds);
-			return false;
-		}
-	}
-	free(userTokens);
-
-	if (!addToken(ppTokenIds, pTokenCount, eotId) || !addToken(ppTokenIds, pTokenCount, pTokenizer->endOfSentenceId) || !addToken(ppTokenIds, pTokenCount, startHeaderId) || !addToken(ppTokenIds, pTokenCount, endHeaderId) || !addToken(ppTokenIds, pTokenCount, pTokenizer->endOfSentenceId))
-	{
-		free(*ppTokenIds);
-		return false;
-	}
-
-	return true;
+	*ppStr = strdup(pTokenizer->idToToken[tokenId]);
 }
 
-bool lyDetokenize(char** ppText, const lyTokenizer* pTokenizer, const int32_t* tokenIds, int32_t tokenCount)
+void lyTokenizerDecodeBatch(char** ppStr, const lyTokenizer* pTokenizer, const int32_t* tokens, size_t tokenCount)
 {
-	if (!ppText || !pTokenizer || !tokenIds || tokenCount <= 0)
+	size_t totalLen = 0;
+	for (size_t i = 0; i < tokenCount; i++)
 	{
-		return false;
+		if (tokens[i] == pTokenizer->padId)
+			break;
+		char* token;
+		lyTokenizerDecodeToken(&token, pTokenizer, tokens[i]);
+		totalLen += strlen(token);
+		free(token);
 	}
 
-	size_t totalLen = 1;
-	for (int32_t i = 0; i < tokenCount; i++)
-	{
-		for (int32_t j = 0; j < pTokenizer->tokenCount; j++)
-		{
-			if (pTokenizer->tokens[j].rank == tokenIds[i])
-			{
-				totalLen += strlen(pTokenizer->tokens[j].piece);
-				break;
-			}
-		}
-	}
+	*ppStr		= (char*)malloc(totalLen + 1);
+	(*ppStr)[0] = '\0';
 
-	char* text = (char*)malloc(totalLen);
-	if (!text)
+	for (size_t i = 0; i < tokenCount; i++)
 	{
-		return false;
+		if (tokens[i] == pTokenizer->padId)
+			break;
+		char* token;
+		lyTokenizerDecodeToken(&token, pTokenizer, tokens[i]);
+		strcat(*ppStr, token);
+		free(token);
 	}
-
-	char* p = text;
-	for (int32_t i = 0; i < tokenCount; i++)
-	{
-		for (int32_t j = 0; j < pTokenizer->tokenCount; j++)
-		{
-			if (pTokenizer->tokens[j].rank == tokenIds[i])
-			{
-				const char* piece	 = pTokenizer->tokens[j].piece;
-				size_t		pieceLen = strlen(piece);
-				memcpy(p, piece, pieceLen);
-				p += pieceLen;
-				break;
-			}
-		}
-	}
-	*p = '\0';
-
-	*ppText = text;
-	return true;
 }

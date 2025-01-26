@@ -12,6 +12,6 @@ typedef struct lyFeedForward
 	lyTensor* ffnUp;
 } lyFeedForward;
 
-bool lyCreateFeedForward(lyFeedForward** ppFeedForward, const lyModel* pModel, int32_t layerIndex);
-void lyDestroyFeedForward(lyFeedForward* pFeedForward);
-bool lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, lyTensor* pInput);
+void lyFeedForwardCreate(lyFeedForward** ppFeedForward, const lyModel* pModel, int32_t layerIndex);
+void lyFeedForwardDestroy(lyFeedForward* pFeedForward);
+void lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, lyTensor* pInput);

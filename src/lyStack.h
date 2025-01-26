@@ -9,9 +9,9 @@ typedef struct lyStack
 	size_t	  capacity;
 } lyStack;
 
-bool lyCreateStack(lyStack** ppStack, size_t initCapacity);
-void lyDestroyStack(lyStack* pStack);
+void lyStackCreate(lyStack** ppStack, size_t initCapacity);
+void lyStackDestroy(lyStack* pStack);
 
-bool lyStackPush(lyStack* pStack, lyValue* pValue);
-bool lyStackPop(lyValue** ppValue, lyStack* pStack);
-bool lyStackPeek(lyValue** ppValue, const lyStack* pStack);
+void lyStackPush(lyStack* pStack, lyValue* pValue);
+void lyStackPop(lyValue** ppValue, lyStack* pStack);
+void lyStackPeek(lyValue** ppValue, const lyStack* pStack);

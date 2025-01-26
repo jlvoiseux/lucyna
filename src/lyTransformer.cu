@@ -3,174 +3,89 @@
 #include "lyTensorMath.h"
 #include "lyTransformer.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
-bool lyCreateTransformer(lyTransformer** ppTransformer, const lyModel* pModel)
+void lyTransformerCreate(lyTransformer** ppTransformer, const lyModel* pModel)
 {
-	if (!ppTransformer || !pModel)
-	{
-		return false;
-	}
-
 	lyTransformer* pTransformer = (lyTransformer*)malloc(sizeof(lyTransformer));
-	if (!pTransformer)
-	{
-		return false;
-	}
+	pTransformer->dim			= pModel->args.dim;
+	pTransformer->vocabSize		= pModel->args.vocabSize;
+	pTransformer->nLayers		= pModel->args.nLayers;
 
-	pTransformer->dim		= pModel->args.dim;
-	pTransformer->vocabSize = pModel->args.vocabSize;
-	pTransformer->nLayers	= pModel->args.nLayers;
-
-	lyTensor* pEmbeddings;
-	if (!lyGetModelTensor(&pEmbeddings, pModel, "tok_embeddings.weight"))
-	{
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
-	pTransformer->tokEmbeddings = pEmbeddings;
-
+	lyModelGetTensor(&pTransformer->tokEmbeddings, pModel, "tok_embeddings.weight");
 	pTransformer->blocks = (lyTransformerBlock**)malloc(sizeof(lyTransformerBlock*) * pTransformer->nLayers);
-	if (!pTransformer->blocks)
-	{
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
-
 	for (int32_t i = 0; i < pTransformer->nLayers; i++)
-	{
-		if (!lyCreateTransformerBlock(&pTransformer->blocks[i], pModel, i))
-		{
-			lyDestroyTransformer(pTransformer);
-			return false;
-		}
-	}
+		lyTransformerBlockCreate(&pTransformer->blocks[i], pModel, i);
 
 	lyTensor* normWeights;
-	if (!lyGetModelTensor(&normWeights, pModel, "norm.weight"))
-	{
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
-	if (!lyCreateRMSNorm(&pTransformer->norm, pModel->args.normEps, normWeights))
-	{
-		lyDestroyTensor(normWeights);
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
+	lyModelGetTensor(&normWeights, pModel, "norm.weight");
+	lyRMSNormCreate(&pTransformer->norm, pModel->args.normEps, normWeights);
 
 	int32_t	  perm[] = {1, 0};
-	lyTensor* output;
 	lyTensor* tempOutput;
-	if (!lyGetModelTensor(&tempOutput, pModel, "output.weight"))
-	{
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
-	if (!lyTensorTranspose(&output, tempOutput, perm))
-	{
-		lyDestroyTensor(tempOutput);
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
-	pTransformer->output = output;
-
-	if (!precomputeFreqsCis(&pTransformer->freqsCis, pTransformer->dim / pModel->args.nHeads, pModel->args.maxSequenceLength * 2, pModel->args.ropeTheta))
-	{
-		lyDestroyTransformer(pTransformer);
-		return false;
-	}
-
+	lyModelGetTensor(&tempOutput, pModel, "output.weight");
+	lyTensorTranspose(&pTransformer->output, tempOutput, perm);
+	lyRopePrecomputeFreqsCis(&pTransformer->freqsCis, pTransformer->dim / pModel->args.nHeads, pModel->args.maxSequenceLength * 2, pModel->args.ropeTheta);
 	*ppTransformer = pTransformer;
-	return true;
 }
 
-void lyDestroyTransformer(lyTransformer* pTransformer)
+void lyTransformerDestroy(lyTransformer* pTransformer)
 {
-	if (!pTransformer)
-	{
-		return;
-	}
-
-	lyDestroyTensor(pTransformer->tokEmbeddings);
-
 	if (pTransformer->blocks)
 	{
 		for (int32_t i = 0; i < pTransformer->nLayers; i++)
 		{
-			lyDestroyTransformerBlock(pTransformer->blocks[i]);
+			lyTransformerBlockDestroy(pTransformer->blocks[i]);
 		}
 		free(pTransformer->blocks);
 	}
 
-	lyDestroyRMSNorm(pTransformer->norm);
-	lyDestroyTensor(pTransformer->output);
-	lyDestroyTensor(pTransformer->freqsCis);
+	lyRMSNormDestroy(pTransformer->norm);
+	lyTensorDestroy(pTransformer->freqsCis);
 	free(pTransformer);
 }
 
-bool lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos)
+void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos)
 {
-	if (!ppOutput || !pTransformer || !pTokens || startPos < 0)
-	{
-		return false;
-	}
-
 	lyTensor* h;
-	if (!lyTensorEmbedding(&h, pTokens, pTransformer->tokEmbeddings))
-	{
-		return false;
-	}
+	lyTensorEmbedding(&h, pTokens, pTransformer->tokEmbeddings);
+	lyTensorPrint(h);
 
 	int32_t	  seqLen = pTokens->shape[0];
 	lyTensor* freqsCis;
 	lyTensorSlice(&freqsCis, pTransformer->freqsCis, startPos, startPos + seqLen);
+	lyTensorPrint(freqsCis);
 
 	lyTensor* mask = NULL;
 	if (seqLen > 1)
 	{
-		int32_t shape[] = {seqLen, seqLen};
-		lyCreateTensor(&mask, shape, 2, NULL, NULL);
+		int32_t shape[] = {seqLen, seqLen + startPos};
+		lyTensorCreate(&mask, shape, 2, NULL, NULL);
+		lyTensorMakeTriangularMask(mask);
+		lyTensorPrint(mask);
 	}
 
 	lyTensor* currentTensor = h;
 	for (int32_t i = 0; i < pTransformer->nLayers; i++)
 	{
 		lyTensor* blockOut;
-		if (!lyTransformerBlockForward(&blockOut, pTransformer->blocks[i], currentTensor, startPos, freqsCis, mask))
-		{
-			if (mask)
-				lyDestroyTensor(mask);
-			lyDestroyTensor(freqsCis);
-			lyDestroyTensor(currentTensor);
-			return false;
-		}
-
+		lyTransformerBlockForward(&blockOut, pTransformer->blocks[i], currentTensor, startPos, freqsCis, mask);
 		if (currentTensor != h)
-		{
-			lyDestroyTensor(currentTensor);
-		}
+			lyTensorDestroy(currentTensor);
 		currentTensor = blockOut;
+		lyTensorPrint(currentTensor);
 	}
 
 	if (mask)
-		lyDestroyTensor(mask);
-	lyDestroyTensor(freqsCis);
+		lyTensorDestroy(mask);
+	lyTensorDestroy(freqsCis);
 
 	lyTensor* normalized;
-	if (!lyRMSNormForward(&normalized, pTransformer->norm, currentTensor))
-	{
-		lyDestroyTensor(currentTensor);
-		return false;
-	}
-	lyDestroyTensor(currentTensor);
+	lyRMSNormForward(&normalized, pTransformer->norm, currentTensor);
+	lyTensorDestroy(currentTensor);
+	lyTensorPrint(normalized);
 
-	if (!lyTensorMatMul(ppOutput, normalized, pTransformer->output))
-	{
-		lyDestroyTensor(normalized);
-		return false;
-	}
-	lyDestroyTensor(normalized);
-
-	return true;
+	lyTensorMatMul(ppOutput, normalized, pTransformer->output);
+	lyTensorDestroy(normalized);
 }

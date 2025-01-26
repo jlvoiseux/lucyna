@@ -44,5 +44,5 @@ typedef struct lyModel
 	lyMappedFile mapping;
 } lyModel;
 
-bool lyCreateDefaultModelArgs(lyModelArgs* pArgs);
-bool lyGetModelTensor(lyTensor** ppTensor, const lyModel* pModel, const char* name);
+void lyModelCreateDefaultArgs(lyModelArgs* pArgs);
+void lyModelGetTensor(lyTensor** ppTensor, const lyModel* pModel, const char* name);

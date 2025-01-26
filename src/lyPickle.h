@@ -45,6 +45,6 @@ typedef struct lyPickleReader
 #define LY_NEWFALSE 0x89
 #define LY_SETITEMS 'u'
 
-bool lyCreatePickleReader(lyPickleReader** ppReader, const uint8_t* data, size_t size);
-void lyDestroyPickleReader(lyPickleReader* pReader);
-bool lyLoadPickle(lyDict** ppDict, lyPickleReader* pReader);
+void lyPickleCreateReader(lyPickleReader** ppReader, const uint8_t* data, size_t size);
+void lyPickleDestroyReader(lyPickleReader* pReader);
+void lyPickleLoad(lyDict** ppDict, lyPickleReader* pReader);

@@ -14,75 +14,29 @@
 #include <unistd.h>
 #endif
 
-bool lyMapModelFile(const char* filename, lyMappedFile* pMapping)
+void lyModelLoaderMapFile(const char* filename, lyMappedFile* pMapping)
 {
-	if (!filename || !pMapping)
-		return false;
-
 #ifdef _WIN32
 	pMapping->fileHandle = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (pMapping->fileHandle == INVALID_HANDLE_VALUE)
-	{
-		fprintf(stderr, "Error opening file: %s\n", filename);
-		return false;
-	}
 
 	LARGE_INTEGER fileSize;
-	if (!GetFileSizeEx(pMapping->fileHandle, &fileSize))
-	{
-		CloseHandle(pMapping->fileHandle);
-		return false;
-	}
-	pMapping->mappedSize = (size_t)fileSize.QuadPart;
-
+	GetFileSizeEx(pMapping->fileHandle, &fileSize);
+	pMapping->mappedSize	= (size_t)fileSize.QuadPart;
 	pMapping->mappingHandle = CreateFileMappingA(pMapping->fileHandle, NULL, PAGE_READONLY, fileSize.HighPart, fileSize.LowPart, NULL);
-	if (!pMapping->mappingHandle)
-	{
-		CloseHandle(pMapping->fileHandle);
-		return false;
-	}
-
-	pMapping->mappedMemory = MapViewOfFile(pMapping->mappingHandle, FILE_MAP_READ, 0, 0, 0);
-	if (!pMapping->mappedMemory)
-	{
-		CloseHandle(pMapping->mappingHandle);
-		CloseHandle(pMapping->fileHandle);
-		return false;
-	}
+	pMapping->mappedMemory	= MapViewOfFile(pMapping->mappingHandle, FILE_MAP_READ, 0, 0, 0);
 
 #else
 	pMapping->fd = open(filename, O_RDONLY);
-	if (pMapping->fd < 0)
-	{
-		fprintf(stderr, "Error opening file: %s\n", filename);
-		return false;
-	}
 
 	struct stat sb;
-	if (fstat(pMapping->fd, &sb) < 0)
-	{
-		close(pMapping->fd);
-		return false;
-	}
-
+	fstat(pMapping->fd, &sb);
 	pMapping->mappedSize   = sb.st_size;
 	pMapping->mappedMemory = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, pMapping->fd, 0);
-
-	if (pMapping->mappedMemory == MAP_FAILED)
-	{
-		close(pMapping->fd);
-		return false;
-	}
 #endif
-
-	return true;
 }
 
-void lyUnmapModelFile(lyMappedFile* pMapping)
+void lyModelLoaderUnmapFile(lyMappedFile* pMapping)
 {
-	if (!pMapping)
-		return;
-
 #ifdef _WIN32
 	if (pMapping->mappedMemory)
 	{
@@ -108,30 +62,17 @@ void lyUnmapModelFile(lyMappedFile* pMapping)
 #endif
 }
 
-bool lyLoadModelArgs(lyModel* pModel, const char* modelDir)
+void lyModelLoaderLoadArgs(lyModel* pModel, const char* modelDir)
 {
-	if (!pModel || !modelDir)
-	{
-		return false;
-	}
-
 	char configPath[1024];
 #ifdef _WIN32
-	if (sprintf_s(configPath, sizeof(configPath), "%s\\params.json", modelDir) < 0)
+	sprintf_s(configPath, sizeof(configPath), "%s\\params.json", modelDir);
 #else
-	if (snprintf(configPath, sizeof(configPath), "%s/params.json", modelDir) < 0)
+	snprintf(configPath, sizeof(configPath), "%s/params.json", modelDir);
 #endif
-	{
-		return false;
-	}
 
 	FILE* configFile = fopen(configPath, "r");
-	if (!configFile)
-	{
-		return false;
-	}
-
-	char line[1024];
+	char  line[1024];
 	while (fgets(line, sizeof(line), configFile))
 	{
 		char* ptr = strchr(line, ':');
@@ -183,173 +124,60 @@ bool lyLoadModelArgs(lyModel* pModel, const char* modelDir)
 	pModel->args.nRep	 = pModel->args.nHeads / pModel->args.nKVHeads;
 
 	fclose(configFile);
-	return true;
 }
 
-bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, bool includeVocab)
+void lyModelLoaderLoadModel(lyModel** ppModel, const char* modelDir)
 {
-	if (!ppModel || !modelDir)
-	{
-		return false;
-	}
-
 	lyModel* pModel = (lyModel*)malloc(sizeof(lyModel));
-	if (!pModel)
-	{
-		return false;
-	}
-
 	memset(pModel, 0, sizeof(lyModel));
-
-	if (!lyCreateDefaultModelArgs(&pModel->args))
-	{
-		free(pModel);
-		return false;
-	}
-
-	if (!includeTensors)
-	{
-		*ppModel = pModel;
-		return true;
-	}
-
-	if (!lyLoadModelArgs(pModel, modelDir))
-	{
-		lyDestroyModel(pModel);
-		return false;
-	}
+	lyModelCreateDefaultArgs(&pModel->args);
+	lyModelLoaderLoadArgs(pModel, modelDir);
 
 	char modelPath[1024];
 #ifdef _WIN32
-	if (sprintf_s(modelPath, sizeof(modelPath), "%s\\consolidated.00.pth", modelDir) < 0)
+	sprintf_s(modelPath, sizeof(modelPath), "%s\\consolidated.00.pth", modelDir);
 #else
-	if (snprintf(modelPath, sizeof(modelPath), "%s/consolidated.00.pth", modelDir) < 0)
+	snprintf(modelPath, sizeof(modelPath), "%s/consolidated.00.pth", modelDir);
 #endif
-	{
-		lyDestroyModel(pModel);
-		return false;
-	}
 
 	lyZipFile* pZip;
-	if (!lyOpenZip(&pZip, modelPath))
-	{
-		lyDestroyModel(pModel);
-		return false;
-	}
+	lyZipOpen(&pZip, modelPath);
 
 	lyZipEntry* pklEntry;
-	if (!lyFindZipEntryPattern(&pklEntry, pZip, "*.pkl"))
-	{
-		lyCloseZip(pZip);
-		lyDestroyModel(pModel);
-		return false;
-	}
+	lyZipFindEntryPattern(&pklEntry, pZip, "*.pkl");
 
 	const uint8_t* pklData;
-	if (!lyGetZipEntryData(&pklData, pZip, pklEntry))
-	{
-		lyCloseZip(pZip);
-		lyDestroyModel(pModel);
-		return false;
-	}
+	lyZipGetEntryData(&pklData, pZip, pklEntry);
 
 	lyPickleReader* pReader;
-	if (!lyCreatePickleReader(&pReader, pklData, pklEntry->size))
-	{
-		lyCloseZip(pZip);
-		lyDestroyModel(pModel);
-		return false;
-	}
+	lyPickleCreateReader(&pReader, pklData, pklEntry->size);
 
-	lyInitTorchHandlers(pReader);
+	lyTorchInitHandler(pReader);
 	pReader->context = pZip;
 
 	lyDict* tensors;
-	if (!lyLoadPickle(&tensors, pReader))
-	{
-		lyDestroyPickleReader(pReader);
-		lyCloseZip(pZip);
-		lyDestroyModel(pModel);
-		return false;
-	}
+	lyPickleLoad(&tensors, pReader);
 
 	pModel->tensorCount = tensors->count;
 	pModel->tensors		= (lyTensor**)malloc(sizeof(lyTensor*) * tensors->count);
-	if (!pModel->tensors)
-	{
-		lyDestroyDict(tensors);
-		lyDestroyPickleReader(pReader);
-		lyCloseZip(pZip);
-		lyDestroyModel(pModel);
-		return false;
-	}
-
 	memset(pModel->tensors, 0, sizeof(lyTensor*) * tensors->count);
 
 	for (size_t i = 0; i < tensors->count; i++)
 	{
 		lyTensor* srcTensor;
-		if (!lyGetPtrValue(tensors->values[i], (void**)&srcTensor))
-		{
-			lyDestroyDict(tensors);
-			lyDestroyPickleReader(pReader);
-			lyCloseZip(pZip);
-			lyDestroyModel(pModel);
-			return false;
-		}
-
-		lyCreateTensor(&pModel->tensors[i], srcTensor->shape, srcTensor->rank, srcTensor->data, tensors->keys[i]);
+		lyValueGetPtr(tensors->values[i], (void**)&srcTensor);
+		lyTensorCreate(&pModel->tensors[i], srcTensor->shape, srcTensor->rank, srcTensor->data, tensors->keys[i]);
 		free(srcTensor->data);
 	}
 
-	lyDestroyDict(tensors);
-	lyDestroyPickleReader(pReader);
-	lyCloseZip(pZip);
-
-	//	printf("Model configuration:\n");
-	//	printf("  Dimension: %d\n", pModel->args.dim);
-	//	printf("  Layers: %d\n", pModel->args.nLayers);
-	//	printf("  Attention heads: %d\n", pModel->args.nHeads);
-	//	printf("  KV heads: %d\n", pModel->args.nKVHeads);
-	//	printf("  Vocabulary size: %d\n", pModel->args.vocabSize);
-	//	printf("  Multiple of: %d\n", pModel->args.multipleOf);
-	//	printf("  FFN dim multiplier: %.1f\n", pModel->args.ffnDimMultiplier);
-	//	printf("  Norm epsilon: %.1e\n", pModel->args.normEps);
-	//	printf("  Use scaled rope: %s\n", pModel->args.useScaledRope ? "true" : "false");
-	//	printf("  Rope theta: %.1f\n", pModel->args.ropeTheta);
-	//	printf("  Max sequence length: %d\n", pModel->args.maxSequenceLength);
-	//	printf("  N rep: %d\n", pModel->args.nRep);
-	//	printf("  Head dimension: %d\n", pModel->args.headDim);
-	//
-	//	printf("\nTensors loaded: %d\n", pModel->tensorCount);
-	//	for (size_t i = 0; i < pModel->tensorCount; i++)
-	//	{
-	//		lyTensor* tensor = &pModel->tensors[i];
-	//
-	//		char shapeStr[256] = "[";
-	//		int	 pos		   = 1;
-	//		for (int32_t d = 0; d < tensor->rank; d++)
-	//
-	//		{
-	//			if (d == 0)
-	//			{
-	//				pos += snprintf(shapeStr + pos, sizeof(shapeStr) - pos, "%d", tensor->shape[d]);
-	//			}
-	//			else
-	//			{
-	//				pos += snprintf(shapeStr + pos, sizeof(shapeStr) - pos, ",%d", tensor->shape[d]);
-	//			}
-	//		}
-	//		snprintf(shapeStr + pos, sizeof(shapeStr) - pos, "]");
-	//
-	//		printf("  %-40s shape: %-20s size: %zu bytes\n", tensor->name, shapeStr, tensor->dataSize);
-	//	}
+	lyDictDestroy(tensors);
+	lyPickleDestroyReader(pReader);
+	lyZipClose(pZip);
 
 	*ppModel = pModel;
-	return true;
 }
 
-void lyDestroyModel(lyModel* pModel)
+void lyModelLoaderDestroyModel(lyModel* pModel)
 {
 	if (!pModel)
 	{
@@ -360,10 +188,10 @@ void lyDestroyModel(lyModel* pModel)
 	{
 		for (int32_t i = 0; i < pModel->tensorCount; i++)
 		{
-			lyDestroyTensor(pModel->tensors[i]);
+			lyTensorDestroy(pModel->tensors[i]);
 		}
 	}
 
-	lyUnmapModelFile(&pModel->mapping);
+	lyModelLoaderUnmapFile(&pModel->mapping);
 	free(pModel);
 }

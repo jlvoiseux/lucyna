@@ -3,118 +3,57 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-bool lyCreateIntValue(lyValue** ppValue, int64_t val)
+void lyValueCreateInt(lyValue** ppValue, int64_t val)
 {
-	if (!ppValue)
-	{
-		return false;
-	}
-
 	lyValue* pValue = (lyValue*)malloc(sizeof(lyValue));
-	if (!pValue)
-	{
-		return false;
-	}
 
 	pValue->type	   = LY_VALUE_INT;
 	pValue->data.asInt = val;
 	*ppValue		   = pValue;
-
-	return true;
 }
 
-bool lyCreateBoolValue(lyValue** ppValue, bool val)
+void lyValueCreateBool(lyValue** ppValue, bool val)
 {
-	if (!ppValue)
-	{
-		return false;
-	}
-
 	lyValue* pValue = (lyValue*)malloc(sizeof(lyValue));
-	if (!pValue)
-	{
-		return false;
-	}
 
 	pValue->type		= LY_VALUE_BOOL;
 	pValue->data.asBool = val;
 	*ppValue			= pValue;
-
-	return true;
 }
 
-bool lyCreatePtrValue(lyValue** ppValue, void* ptr)
+void lyValueCreatePtr(lyValue** ppValue, void* ptr)
 {
-	if (!ppValue)
-	{
-		return false;
-	}
-
 	lyValue* pValue = (lyValue*)malloc(sizeof(lyValue));
-	if (!pValue)
-	{
-		return false;
-	}
 
 	pValue->type	   = LY_VALUE_PTR;
 	pValue->data.asPtr = ptr;
 	*ppValue		   = pValue;
-
-	return true;
 }
 
-void lyDestroyValue(lyValue* pValue)
+void lyValueDestroy(lyValue* pValue)
 {
 	free(pValue);
 }
 
-bool lyGetIntValue(const lyValue* pValue, int64_t* pOut)
+void lyValueGetInt(const lyValue* pValue, int64_t* pOut)
 {
-	if (!pValue || pValue->type != LY_VALUE_INT || !pOut)
-	{
-		return false;
-	}
-
 	*pOut = pValue->data.asInt;
-	return true;
 }
 
-bool lyGetBoolValue(const lyValue* pValue, bool* pOut)
+void lyValueGetBool(const lyValue* pValue, bool* pOut)
 {
-	if (!pValue || pValue->type != LY_VALUE_BOOL || !pOut)
-	{
-		return false;
-	}
-
 	*pOut = pValue->data.asBool;
-	return true;
 }
 
-bool lyGetPtrValue(const lyValue* pValue, void** pOut)
+void lyValueGetPtr(const lyValue* pValue, void** pOut)
 {
-	if (!pValue || pValue->type != LY_VALUE_PTR || !pOut)
-	{
-		return false;
-	}
-
 	*pOut = pValue->data.asPtr;
-	return true;
 }
 
-bool lyCloneValue(lyValue** ppOut, const lyValue* pValue)
+void lyValueClone(lyValue** ppOut, const lyValue* pValue)
 {
-	if (!ppOut || !pValue)
-	{
-		return false;
-	}
-
 	lyValue* pCopy = (lyValue*)malloc(sizeof(lyValue));
-	if (!pCopy)
-	{
-		return false;
-	}
-
-	pCopy->type = pValue->type;
+	pCopy->type	   = pValue->type;
 
 	switch (pValue->type)
 	{
@@ -129,14 +68,12 @@ bool lyCloneValue(lyValue** ppOut, const lyValue* pValue)
 			break;
 		default:
 			free(pCopy);
-			return false;
 	}
 
 	*ppOut = pCopy;
-	return true;
 }
 
-void lyPrintValue(const lyValue* pValue)
+void lyValuePrint(const lyValue* pValue)
 {
 	if (!pValue)
 	{

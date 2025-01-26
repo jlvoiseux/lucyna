@@ -24,10 +24,10 @@ typedef struct lyTorchStorage
 	void*		rawData;
 } lyTorchStorage;
 
-void lyInitTorchHandlers(lyPickleReader* pReader);
+void lyTorchInitHandler(lyPickleReader* pReader);
 
-void* lyFindTorchClass(const char* module, const char* name);
-void* lyPersistentLoadTorch(lyPickleReader* pReader, void** pidArray, size_t pidArraySize);
+void* lyTorchFindClass(const char* module, const char* name);
+void* lyTorchPersistentLoad(lyPickleReader* pReader, void** pidArray, size_t pidArraySize);
 
-bool lyRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount);
-bool lyCreateTorchStorage(lyTorchStorage** ppStorage, const char* filename, lyTorchType storageType, size_t offset, size_t elementCount, lyZipFile* pZip);
+void lyTorchRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount);
+void lyTorchCreateStorage(lyTorchStorage** ppStorage, const char* filename, lyTorchType storageType, size_t offset, size_t elementCount, lyZipFile* pZip);

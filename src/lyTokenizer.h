@@ -2,31 +2,30 @@
 
 #include "lyTensor.h"
 
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
 #include <stdbool.h>
-#include <stdint.h>
-
-typedef struct lyToken
-{
-	char*	piece;
-	int32_t rank;
-} lyToken;
 
 typedef struct lyTokenizer
 {
-	lyToken* tokens;
-	int32_t	 tokenCount;
+	pcre2_code* splitRegex;
+	char**		idToToken;
+	int32_t*	tokenToId;
+	size_t		vocabSize;
 
 	int32_t	 beginOfSentenceId;
 	int32_t	 endOfSentenceId;
 	int32_t	 unknownId;
 	int32_t	 padId;
 	int32_t* stopTokenIds;
-	int32_t	 stopTokenCount;
+	size_t	 stopTokenCount;
 } lyTokenizer;
 
-bool addToken(int32_t** ppTokenIds, int32_t* pTokenCount, int32_t tokenId);
-bool findToken(int32_t* pTokenId, const lyTokenizer* pTokenizer, const char* piece);
+void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath);
+void lyTokenizerDestroy(lyTokenizer* pTokenizer);
 
-bool lyTokenizeText(int32_t** ppTokenIds, int32_t* pTokenCount, const lyTokenizer* pTokenizer, const char* text, bool addBeginOfSentence);
-bool lyTokenizePrompt(int32_t** ppTokenIds, int32_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt);
-bool lyDetokenize(char** ppText, const lyTokenizer* pTokenizer, const int32_t* tokenIds, int32_t tokenCount);
+void lyTokenizerTokenize(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* text, bool addBeginOfSentence);
+void lyTokenizerTokenizePrompt(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt);
+
+void lyTokenizerDecodeToken(char** ppStr, const lyTokenizer* pTokenizer, int32_t tokenId);
+void lyTokenizerDecodeBatch(char** ppStr, const lyTokenizer* pTokenizer, const int32_t* tokens, size_t tokenCount);

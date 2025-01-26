@@ -5,10 +5,10 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 
-bool lyMapModelFile(const char* filename, lyMappedFile* pMapping);
-void lyUnmapModelFile(lyMappedFile* pMapping);
+void lyModelLoaderMapFile(const char* filename, lyMappedFile* pMapping);
+void lyModelLoaderUnmapFile(lyMappedFile* pMapping);
 
-bool lyLoadModelArgs(lyModel* pModel, const char* modelDir);
+void lyModelLoaderLoadArgs(lyModel* pModel, const char* modelDir);
 
-bool lyLoadModel(lyModel** ppModel, const char* modelDir, bool includeTensors, bool includeVocab);
-void lyDestroyModel(lyModel* pModel);
+void lyModelLoaderLoadModel(lyModel** ppModel, const char* modelDir);
+void lyModelLoaderDestroyModel(lyModel* pModel);

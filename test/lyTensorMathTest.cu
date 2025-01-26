@@ -11,12 +11,12 @@ void tearDown(void)
 {
 	if (pTensorA)
 	{
-		lyDestroyTensor(pTensorA);
+		lyTensorDestroy(pTensorA);
 		pTensorA = NULL;
 	}
 	if (pTensorB)
 	{
-		lyDestroyTensor(pTensorB);
+		lyTensorDestroy(pTensorB);
 		pTensorB = NULL;
 	}
 }
@@ -37,8 +37,8 @@ void test_TensorScaleAndAdd2D(void)
 		dataB[i] = __float2bfloat16((float)(i + 1) * 0.5f);
 	}
 
-	lyCreateTensor(&pTensorA, shape, 2, dataA, NULL);
-	lyCreateTensor(&pTensorB, shape, 2, dataB, NULL);
+	lyTensorCreate(&pTensorA, shape, 2, dataA, NULL);
+	lyTensorCreate(&pTensorB, shape, 2, dataB, NULL);
 
 	lyTensor* pOutput;
 	float	  alpha = 2.0f;
@@ -51,7 +51,7 @@ void test_TensorScaleAndAdd2D(void)
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorScaleAndAdd3D(void)
@@ -67,8 +67,8 @@ void test_TensorScaleAndAdd3D(void)
 		dataB[i] = __float2bfloat16((float)(i + 1) * 0.1f);
 	}
 
-	lyCreateTensor(&pTensorA, shape, 3, dataA, NULL);
-	lyCreateTensor(&pTensorB, shape, 3, dataB, NULL);
+	lyTensorCreate(&pTensorA, shape, 3, dataA, NULL);
+	lyTensorCreate(&pTensorB, shape, 3, dataB, NULL);
 
 	lyTensor* pOutput;
 	float	  alpha = 0.5f;
@@ -84,30 +84,30 @@ void test_TensorScaleAndAdd3D(void)
 
 	free(dataA);
 	free(dataB);
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorScaleAndAddInvalidShapes(void)
 {
 	int32_t shapeA[] = {2, 3};
 	int32_t shapeB[] = {2, 3, 2};
-	lyCreateTensor(&pTensorA, shapeA, 2, NULL, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 3, NULL, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 2, NULL, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 3, NULL, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_FALSE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, 1.0f, 1.0f));
 
 	// Test tensors with same rank but different dimensions
 	int32_t shapeC[] = {2, 4};
-	lyCreateTensor(&pTensorB, shapeC, 2, NULL, NULL);
+	lyTensorCreate(&pTensorB, shapeC, 2, NULL, NULL);
 	TEST_ASSERT_FALSE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, 1.0f, 1.0f));
 }
 
 void test_TensorScaleAndAddRank1Invalid(void)
 {
 	int32_t shape[] = {3};
-	lyCreateTensor(&pTensorA, shape, 1, NULL, NULL);
-	lyCreateTensor(&pTensorB, shape, 1, NULL, NULL);
+	lyTensorCreate(&pTensorA, shape, 1, NULL, NULL);
+	lyTensorCreate(&pTensorB, shape, 1, NULL, NULL);
 	lyTensor* pOutput;
 	TEST_ASSERT_FALSE(lyTensorScaleAndAdd(&pOutput, pTensorA, pTensorB, 1.0f, 1.0f));
 }
@@ -134,8 +134,8 @@ void test_TensorScaleAndAddBroadcast(void)
 		dataB[i] = __float2bfloat16((float)(i + 1) * 0.1f);
 	}
 
-	lyCreateTensor(&pTensorA, shapeA, 3, dataA, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 2, dataB, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 3, dataA, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 2, dataB, NULL);
 
 	lyTensor* pOutput;
 	float	  alpha = 2.0f;
@@ -148,7 +148,34 @@ void test_TensorScaleAndAddBroadcast(void)
 
 	free(dataA);
 	free(dataB);
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
+}
+
+void test_TensorScaleOnly(void)
+{
+	int32_t shape[] = {2, 3};
+
+	nv_bfloat16 dataA[6];
+	for (int i = 0; i < 6; i++)
+	{
+		dataA[i] = __float2bfloat16((float)(i + 1));
+	}
+
+	lyTensorCreate(&pTensorA, shape, 2, dataA, NULL);
+
+	lyTensor* pOutput;
+	float	  alpha = 2.0f;
+	TEST_ASSERT_TRUE(lyTensorScaleAndAdd(&pOutput, pTensorA, NULL, alpha, 0.0f));  // beta unused when pB is NULL
+
+	// Check that each element was properly scaled
+	for (int i = 0; i < 6; i++)
+	{
+		float expected = (float)(i + 1) * alpha;
+		float actual   = __bfloat162float(pOutput->data[i]);
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
+	}
+
+	lyTensorDestroy(pOutput);
 }
 
 void test_MatMul2D(void)
@@ -168,8 +195,8 @@ void test_MatMul2D(void)
 		dataB[i] = __float2bfloat16((float)(i + 1));
 	}
 
-	lyCreateTensor(&pTensorA, shapeA, 2, dataA, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 2, dataB, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 2, dataA, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 2, dataB, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorMatMul(&pOutput, pTensorA, pTensorB));
@@ -184,7 +211,7 @@ void test_MatMul2D(void)
 		TEST_ASSERT_FLOAT_WITHIN(0.1f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_MatMul3D(void)
@@ -199,8 +226,8 @@ void test_MatMul3D(void)
 		dataB[i] = __float2bfloat16((float)(i + 1));
 	}
 
-	lyCreateTensor(&pTensorA, shapeA, 3, dataA, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 3, dataB, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 3, dataA, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 3, dataB, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorMatMul(&pOutput, pTensorA, pTensorB));
@@ -210,15 +237,15 @@ void test_MatMul3D(void)
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[1]);
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[2]);
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_MatMulInvalidShapes(void)
 {
 	int32_t shapeA[] = {2, 3};
 	int32_t shapeB[] = {2, 2};
-	lyCreateTensor(&pTensorA, shapeA, 2, NULL, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 2, NULL, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 2, NULL, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 2, NULL, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_FALSE(lyTensorMatMul(&pOutput, pTensorA, pTensorB));
@@ -228,8 +255,8 @@ void test_MatMulDifferentRanks(void)
 {
 	int32_t shapeA[] = {2, 2, 3};
 	int32_t shapeB[] = {3, 2};	// Different rank
-	lyCreateTensor(&pTensorA, shapeA, 3, NULL, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 2, NULL, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 3, NULL, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 2, NULL, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_FALSE(lyTensorMatMul(&pOutput, pTensorA, pTensorB));
@@ -254,8 +281,8 @@ void test_MatMul4D(void)
 		dataB[i] = __float2bfloat16((float)(i + 1));
 	}
 
-	lyCreateTensor(&pTensorA, shapeA, 4, dataA, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 4, dataB, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 4, dataA, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 4, dataB, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorMatMul(&pOutput, pTensorA, pTensorB));
@@ -268,7 +295,7 @@ void test_MatMul4D(void)
 
 	free(dataA);
 	free(dataB);
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorElementwiseMul(void)
@@ -282,8 +309,8 @@ void test_TensorElementwiseMul(void)
 		dataB[i] = __float2bfloat16(2.0f);
 	}
 
-	lyCreateTensor(&pTensorA, shape, 2, dataA, NULL);
-	lyCreateTensor(&pTensorB, shape, 2, dataB, NULL);
+	lyTensorCreate(&pTensorA, shape, 2, dataA, NULL);
+	lyTensorCreate(&pTensorB, shape, 2, dataB, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorElementwiseMul(&pOutput, pTensorA, pTensorB));
@@ -295,14 +322,14 @@ void test_TensorElementwiseMul(void)
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
 	}
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorMakeTriangularMask(void)
 {
 	int32_t shape[] = {3, 3};
 
-	lyCreateTensor(&pTensorA, shape, 2, NULL, NULL);
+	lyTensorCreate(&pTensorA, shape, 2, NULL, NULL);
 
 	TEST_ASSERT_TRUE(lyTensorMakeTriangularMask(pTensorA));
 
@@ -328,7 +355,7 @@ void test_TensorArgmax(void)
 {
 	int32_t		shape[] = {2, 3};
 	nv_bfloat16 data[]	= {__float2bfloat16(1.0f), __float2bfloat16(3.0f), __float2bfloat16(2.0f), __float2bfloat16(0.0f), __float2bfloat16(5.0f), __float2bfloat16(4.0f)};
-	lyCreateTensor(&pTensorA, shape, 2, data, NULL);
+	lyTensorCreate(&pTensorA, shape, 2, data, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorArgmax(&pOutput, pTensorA, 1));
@@ -339,7 +366,65 @@ void test_TensorArgmax(void)
 	TEST_ASSERT_EQUAL_INT32(1, (int32_t)__bfloat162float(pOutput->data[0]));  // max at index 1 in first row
 	TEST_ASSERT_EQUAL_INT32(1, (int32_t)__bfloat162float(pOutput->data[1]));  // max at index 1 in second row
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
+}
+
+void test_TensorSoftmax(void)
+{
+	int32_t		shape[] = {2, 3};
+	nv_bfloat16 data[]	= {__float2bfloat16(1.0f), __float2bfloat16(2.0f), __float2bfloat16(3.0f), __float2bfloat16(4.0f), __float2bfloat16(5.0f), __float2bfloat16(6.0f)};
+	lyTensorCreate(&pTensorA, shape, 2, data, NULL);
+
+	lyTensor* pOutput;
+	TEST_ASSERT_TRUE(lyTensorSoftmax(&pOutput, pTensorA, 1));
+
+	float sum1 = 0.0f;
+	for (int i = 0; i < 3; i++)
+	{
+		sum1 += __bfloat162float(pOutput->data[i]);
+	}
+	TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, sum1);
+
+	float sum2 = 0.0f;
+	for (int i = 3; i < 6; i++)
+	{
+		sum2 += __bfloat162float(pOutput->data[i]);
+	}
+	TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, sum2);
+
+	float expected1[] = {0.0900f, 0.2447f, 0.6652f};
+	for (int i = 0; i < 3; i++)
+	{
+		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected1[i], __bfloat162float(pOutput->data[i]));
+	}
+
+	lyTensorDestroy(pOutput);
+
+	int32_t		shape3d[] = {2, 2, 2};
+	nv_bfloat16 data3d[]  = {__float2bfloat16(1.0f), __float2bfloat16(2.0f), __float2bfloat16(3.0f), __float2bfloat16(4.0f), __float2bfloat16(5.0f), __float2bfloat16(6.0f), __float2bfloat16(7.0f), __float2bfloat16(8.0f)};
+	lyTensorCreate(&pTensorA, shape3d, 3, data3d, NULL);
+
+	TEST_ASSERT_TRUE(lyTensorSoftmax(&pOutput, pTensorA, 1));
+
+	TEST_ASSERT_EQUAL_INT32(3, pOutput->rank);
+	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[0]);
+	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[1]);
+	TEST_ASSERT_EQUAL_INT32(2, pOutput->shape[2]);
+
+	for (int i = 0; i < 2; i++)
+	{
+		for (int k = 0; k < 2; k++)
+		{
+			float sum = 0.0f;
+			for (int j = 0; j < 2; j++)
+			{
+				sum += __bfloat162float(pOutput->data[i * 4 + j * 2 + k]);
+			}
+			TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, sum);
+		}
+	}
+
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorOuter(void)
@@ -350,8 +435,8 @@ void test_TensorOuter(void)
 	nv_bfloat16 dataA[] = {__float2bfloat16(1.0f), __float2bfloat16(2.0f)};
 	nv_bfloat16 dataB[] = {__float2bfloat16(3.0f), __float2bfloat16(4.0f), __float2bfloat16(5.0f)};
 
-	lyCreateTensor(&pTensorA, shapeA, 1, dataA, NULL);
-	lyCreateTensor(&pTensorB, shapeB, 1, dataB, NULL);
+	lyTensorCreate(&pTensorA, shapeA, 1, dataA, NULL);
+	lyTensorCreate(&pTensorB, shapeB, 1, dataB, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorOuter(&pOutput, pTensorA, pTensorB));
@@ -366,7 +451,7 @@ void test_TensorOuter(void)
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorEmbedding(void)
@@ -395,8 +480,8 @@ void test_TensorEmbedding(void)
 		embeddingData[i * 2 + 1] = __float2bfloat16((float)i + 0.1f);
 	}
 
-	lyCreateTensor(&pTensorA, tokenShape, 1, tokenData, NULL);
-	lyCreateTensor(&pTensorB, embeddingShape, 2, embeddingData, NULL);
+	lyTensorCreate(&pTensorA, tokenShape, 1, tokenData, NULL);
+	lyTensorCreate(&pTensorB, embeddingShape, 2, embeddingData, NULL);
 
 	lyTensor* pOutput;
 	TEST_ASSERT_TRUE(lyTensorEmbedding(&pOutput, pTensorA, pTensorB));
@@ -415,7 +500,7 @@ void test_TensorEmbedding(void)
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorTranspose(void)
@@ -426,7 +511,7 @@ void test_TensorTranspose(void)
 	{
 		data[i] = __float2bfloat16((float)i);
 	}
-	lyCreateTensor(&pTensorA, shape, 2, data, NULL);
+	lyTensorCreate(&pTensorA, shape, 2, data, NULL);
 	free(data);
 
 	lyTensor* pOutput;
@@ -448,7 +533,7 @@ void test_TensorTranspose(void)
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected[i], __bfloat162float(pOutput->data[i]));
 	}
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorTranspose3D(void)
@@ -459,7 +544,7 @@ void test_TensorTranspose3D(void)
 	{
 		data[i] = __float2bfloat16((float)i);
 	}
-	lyCreateTensor(&pTensorA, shape, 3, data, NULL);
+	lyTensorCreate(&pTensorA, shape, 3, data, NULL);
 	free(data);
 
 	lyTensor* pOutput;
@@ -475,7 +560,7 @@ void test_TensorTranspose3D(void)
 	TEST_ASSERT_FLOAT_WITHIN(0.01f, 4.0f, __bfloat162float(pOutput->data[1]));
 	TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f, __bfloat162float(pOutput->data[2]));
 
-	lyDestroyTensor(pOutput);
+	lyTensorDestroy(pOutput);
 }
 
 void test_TensorTranspose3DLarge(void)
@@ -491,7 +576,7 @@ void test_TensorTranspose3DLarge(void)
 		data[i] = __float2bfloat16((float)(i + 1));
 	}
 
-	lyCreateTensor(&pTensorA, shape, 3, data, NULL);
+	lyTensorCreate(&pTensorA, shape, 3, data, NULL);
 
 	int32_t	  perm[] = {1, 0, 2};
 	lyTensor* pTransposed;
@@ -516,7 +601,7 @@ void test_TensorTranspose3DLarge(void)
 	}
 
 	free(data);
-	lyDestroyTensor(pTransposed);
+	lyTensorDestroy(pTransposed);
 }
 
 int main(void)
@@ -527,6 +612,7 @@ int main(void)
 	RUN_TEST(test_TensorScaleAndAddInvalidShapes);
 	RUN_TEST(test_TensorScaleAndAddRank1Invalid);
 	RUN_TEST(test_TensorScaleAndAddBroadcast);
+	RUN_TEST(test_TensorScaleOnly);
 	RUN_TEST(test_MatMul2D);
 	RUN_TEST(test_MatMul3D);
 	RUN_TEST(test_MatMulInvalidShapes);
@@ -535,6 +621,7 @@ int main(void)
 	RUN_TEST(test_TensorElementwiseMul);
 	RUN_TEST(test_TensorMakeTriangularMask);
 	RUN_TEST(test_TensorArgmax);
+	RUN_TEST(test_TensorSoftmax);
 	RUN_TEST(test_TensorOuter);
 	RUN_TEST(test_TensorEmbedding);
 	RUN_TEST(test_TensorTranspose);

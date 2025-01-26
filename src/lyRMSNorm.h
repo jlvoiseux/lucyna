@@ -8,6 +8,6 @@ typedef struct lyRMSNorm
 	lyTensor* weights;
 } lyRMSNorm;
 
-bool lyCreateRMSNorm(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights);
-void lyDestroyRMSNorm(lyRMSNorm* pNorm);
-bool lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pInput);
+void lyRMSNormCreate(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights);
+void lyRMSNormDestroy(lyRMSNorm* pNorm);
+void lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pInput);

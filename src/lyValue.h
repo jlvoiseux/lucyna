@@ -22,15 +22,15 @@ typedef struct lyValue
 	} data;
 } lyValue;
 
-bool lyCreateIntValue(lyValue** ppValue, int64_t val);
-bool lyCreateBoolValue(lyValue** ppValue, bool val);
-bool lyCreatePtrValue(lyValue** ppValue, void* ptr);
-void lyDestroyValue(lyValue* pValue);
+void lyValueCreateInt(lyValue** ppValue, int64_t val);
+void lyValueCreateBool(lyValue** ppValue, bool val);
+void lyValueCreatePtr(lyValue** ppValue, void* ptr);
+void lyValueDestroy(lyValue* pValue);
 
-bool lyGetIntValue(const lyValue* pValue, int64_t* pOut);
-bool lyGetBoolValue(const lyValue* pValue, bool* pOut);
-bool lyGetPtrValue(const lyValue* pValue, void** pOut);
+void lyValueGetInt(const lyValue* pValue, int64_t* pOut);
+void lyValueGetBool(const lyValue* pValue, bool* pOut);
+void lyValueGetPtr(const lyValue* pValue, void** pOut);
 
-bool lyCloneValue(lyValue** ppOut, const lyValue* pValue);
+void lyValueClone(lyValue** ppOut, const lyValue* pValue);
 
-void lyPrintValue(const lyValue* pValue);
+void lyValuePrint(const lyValue* pValue);

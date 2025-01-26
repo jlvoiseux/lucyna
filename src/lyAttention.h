@@ -20,6 +20,6 @@ typedef struct lyAttention
 	lyTensor* cacheV;
 } lyAttention;
 
-bool lyCreateAttention(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex);
-void lyDestroyAttention(lyAttention* pAttention);
-bool lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask);
+void lyAttentionCreate(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex);
+void lyAttentionDestroy(lyAttention* pAttention);
+void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask);
