@@ -29,47 +29,49 @@ void lyInferenceDestroy(lyInference* pInference)
 	free(pInference);
 }
 
-void lyInferenceCreateInputTokens(lyTensor** ppTokens, const int32_t* tokenIds, int32_t tokenCount)
+void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, int32_t* pTokens, int32_t* pTokenCount, int32_t startPos)
 {
-	int32_t	  shape[] = {tokenCount};
-	lyTensor* tokens;
-	lyTensorCreate(&tokens, shape, 1, NULL, NULL);
+	if (*pTokenCount >= pInference->sequenceLength)
+	{
+		pResult->state = GSFinishedByReachingSeqLen;
+		return;
+	}
 
-	for (int32_t i = 0; i < tokenCount; i++)
-		lyTensorSetItem(tokens, &i, tokenIds[i]);
-
-	*ppTokens = tokens;
-}
-
-void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, lyTensor* pInputTokens, int32_t startPos)
-{
-	lyTensorPrint(pInputTokens);
-
+	int32_t	  curPos = *pTokenCount;
 	lyTensor* logits;
-	lyTransformerForward(&logits, pInference->transformer, pInputTokens, startPos);
-	lyTensorPrint(logits);
+	lyTransformerForward(&logits, pInference->transformer, pTokens + startPos, curPos - startPos, startPos);
 
 	lyTensor* lastLogits;
 	lyTensorSlice(&lastLogits, logits, logits->shape[0] - 1, logits->shape[0]);
 	lyTensorDestroy(logits);
-	lyTensorPrint(lastLogits);
-
-	lyTensor* maxToken;
-	lyTensorArgmax(&maxToken, lastLogits, lastLogits->rank - 1);
-	lyTensorDestroy(lastLogits);
-	lyTensorPrint(maxToken);
 
 	int32_t nextToken;
-	int32_t loc[] = {0};
-	lyTensorGetItem(&nextToken, maxToken, loc);
-	lyTensorDestroy(maxToken);
+	lyTensorArgmax(&nextToken, lastLogits);
+	lyTensorDestroy(lastLogits);
+
+	if (pTokens[curPos] != pInference->tokenizer->padId)
+	{
+		nextToken = pTokens[curPos];
+	}
+
+	pTokens[curPos] = nextToken;
+	(*pTokenCount)++;
 
 	pResult->tokenId = nextToken;
-	printf("Next token: %d\n", nextToken);
 
-	if (nextToken == pInference->tokenizer->endOfSentenceId)
+	bool isStopToken = false;
+	for (size_t i = 0; i < pInference->tokenizer->stopTokenCount; i++)
+	{
+		if (nextToken == pInference->tokenizer->stopTokenIds[i])
+		{
+			isStopToken = true;
+			break;
+		}
+	}
+
+	if (isStopToken)
 		pResult->state = GSFinishedByReachingEOS;
-	else if (startPos + 1 >= pInference->sequenceLength)
+	else if (curPos + 1 >= pInference->sequenceLength)
 		pResult->state = GSFinishedByReachingSeqLen;
 	else
 		pResult->state = GSInProgress;

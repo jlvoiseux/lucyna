@@ -19,4 +19,4 @@ typedef struct lyTransformerBlock
 void lyTransformerBlockCreate(lyTransformerBlock** ppBlock, const lyModel* pModel, int32_t layerIndex);
 void lyTransformerBlockDestroy(lyTransformerBlock* pBlock);
 
-void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask);
+void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensorDouble* pFreqsCis, lyTensor* pMask);

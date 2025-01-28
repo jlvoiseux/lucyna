@@ -69,30 +69,36 @@ void lyRepeatKV(lyTensor** ppOutput, lyTensor* pInput, int32_t nRep)
 		lyTensor* pOutput;
 		lyTensorCreate(&pOutput, pInput->shape, pInput->rank, pInput->data, NULL);
 		*ppOutput = pOutput;
+		return;
 	}
-	else
+
+	int32_t seqLen	 = pInput->shape[0];
+	int32_t nKVHeads = pInput->shape[1];
+	int32_t headDim	 = pInput->shape[2];
+
+	lyTensor* pIntermediate;
+	int32_t	  intermediateShape[] = {seqLen, nKVHeads, nRep, headDim};
+	lyTensorCreate(&pIntermediate, intermediateShape, 4, NULL, NULL);
+
+	for (int32_t i = 0; i < seqLen; i++)
 	{
-		int32_t seqLen	 = pInput->shape[0];
-		int32_t nKVHeads = pInput->shape[1];
-		int32_t headDim	 = pInput->shape[2];
-
-		lyTensor* pOutput;
-		int32_t	  outputShape[] = {seqLen, nKVHeads * nRep, headDim};
-		lyTensorCreate(&pOutput, outputShape, 3, NULL, NULL);
-
-		size_t sliceSize = nKVHeads * headDim * sizeof(nv_bfloat16);
-		for (int32_t i = 0; i < seqLen; i++)
+		for (int32_t j = 0; j < nKVHeads; j++)
 		{
-			for (int32_t j = 0; j < nRep; j++)
+			size_t srcOffset = (i * nKVHeads + j) * headDim;
+			for (int32_t rep = 0; rep < nRep; rep++)
 			{
-				size_t srcOffset = i * sliceSize;
-				size_t dstOffset = (i * nKVHeads * nRep + j * nKVHeads) * headDim * sizeof(nv_bfloat16);
-				memcpy((uint8_t*)pOutput->data + dstOffset, (uint8_t*)pInput->data + srcOffset, sliceSize);
+				size_t dstOffset = ((i * nKVHeads + j) * nRep + rep) * headDim;
+				memcpy(pIntermediate->data + dstOffset, pInput->data + srcOffset, headDim * sizeof(nv_bfloat16));
 			}
 		}
-
-		*ppOutput = pOutput;
 	}
+
+	lyTensor* pOutput;
+	int32_t	  outputShape[] = {seqLen, nKVHeads * nRep, headDim};
+	lyTensorCreate(&pOutput, outputShape, 3, pIntermediate->data, NULL);
+
+	lyTensorDestroy(pIntermediate);
+	*ppOutput = pOutput;
 }
 
 void lyUpdateKVCache(lyAttention* pAttention, lyTensor* pK, lyTensor* pV, int32_t startPos)
@@ -114,7 +120,7 @@ void lyUpdateKVCache(lyAttention* pAttention, lyTensor* pK, lyTensor* pV, int32_
 	lyTensorPrint(pAttention->cacheV);
 }
 
-void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
+void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* pInput, int32_t startPos, lyTensorDouble* pFreqsCis, lyTensor* pMask)
 {
 	lyTensorPrint(pInput);
 
@@ -180,16 +186,18 @@ void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* 
 
 	lyTensor* scores;
 	lyTensorMatMul(&scores, transposedQ, reTransposedK);
+	lyTensorPrint(transposedQ);
+	lyTensorPrint(reTransposedK);
 	lyTensorPrint(scores);
 
-	float	  scaleFactor = 1.0f / sqrt(pAttention->headDim);
-	lyTensor* scaledScores;
-	lyTensorScaleAndAdd(&scaledScores, scores, pMask, scaleFactor, 1.0f);
+	nv_bfloat16 scaleFactor = __float2bfloat16_rz((float)(1.0 / sqrt((double)pAttention->headDim)));
+	lyTensor*	scaledScores;
+	lyTensorScaleAndAdd(&scaledScores, scores, pMask, scaleFactor, __float2bfloat16_rz(1.f));
 	lyTensorDestroy(scores);
 	lyTensorPrint(scaledScores);
 
 	lyTensor* softmaxScores;
-	lyTensorSoftmax(&softmaxScores, scaledScores, scaledScores->rank - 1);
+	lyTensorSoftmax(&softmaxScores, scaledScores);
 	lyTensorDestroy(scaledScores);
 	lyTensorPrint(softmaxScores);
 
@@ -199,8 +207,18 @@ void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* 
 	lyTensorDestroy(transposedV);
 	lyTensorPrint(attnOut);
 
-	int32_t flatShape[] = {seqLen, pAttention->nHeads * pAttention->headDim};
-	lyTensorReshape(attnOut, flatShape, 2);
-	lyTensorMatMul(ppOutput, attnOut, pAttention->attnWO);
+	lyTensor* reTransposed;
+	int32_t	  transposePerm[] = {1, 0, 2};
+	lyTensorTranspose(&reTransposed, attnOut, transposePerm);
 	lyTensorDestroy(attnOut);
+	lyTensorPrint(reTransposed);
+
+	int32_t flatShape[] = {seqLen, pAttention->nHeads * pAttention->headDim};
+	lyTensorReshape(reTransposed, flatShape, 2);
+	lyTensorPrint(reTransposed);
+
+	lyTensorMatMul(ppOutput, reTransposed, pAttention->attnWO);
+	lyTensorPrint(*ppOutput);
+
+	lyTensorDestroy(reTransposed);
 }

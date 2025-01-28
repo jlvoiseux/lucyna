@@ -20,7 +20,7 @@ void lyTransformerCreate(lyTransformer** ppTransformer, const lyModel* pModel)
 
 	lyTensor* normWeights;
 	lyModelGetTensor(&normWeights, pModel, "norm.weight");
-	lyRMSNormCreate(&pTransformer->norm, pModel->args.normEps, normWeights);
+	lyRMSNormCreate(&pTransformer->norm, 0.00001f, normWeights);
 
 	int32_t	  perm[] = {1, 0};
 	lyTensor* tempOutput;
@@ -42,20 +42,18 @@ void lyTransformerDestroy(lyTransformer* pTransformer)
 	}
 
 	lyRMSNormDestroy(pTransformer->norm);
-	lyTensorDestroy(pTransformer->freqsCis);
+	lyTensorDoubleDestroy(pTransformer->freqsCis);
 	free(pTransformer);
 }
 
-void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos)
+void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, const int32_t* pInputTokens, int32_t seqLen, int32_t startPos)
 {
 	lyTensor* h;
-	lyTensorEmbedding(&h, pTokens, pTransformer->tokEmbeddings);
+	lyTensorEmbedding(&h, pInputTokens, seqLen, pTransformer->tokEmbeddings);
 	lyTensorPrint(h);
 
-	int32_t	  seqLen = pTokens->shape[0];
-	lyTensor* freqsCis;
-	lyTensorSlice(&freqsCis, pTransformer->freqsCis, startPos, startPos + seqLen);
-	lyTensorPrint(freqsCis);
+	lyTensorDouble* freqsCis;
+	lyTensorDoubleSlice(&freqsCis, pTransformer->freqsCis, startPos, startPos + seqLen);
 
 	lyTensor* mask = NULL;
 	if (seqLen > 1)
@@ -79,7 +77,7 @@ void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTe
 
 	if (mask)
 		lyTensorDestroy(mask);
-	lyTensorDestroy(freqsCis);
+	lyTensorDoubleDestroy(freqsCis);
 
 	lyTensor* normalized;
 	lyRMSNormForward(&normalized, pTransformer->norm, currentTensor);

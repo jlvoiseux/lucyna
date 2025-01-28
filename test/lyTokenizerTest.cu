@@ -71,7 +71,7 @@ void test_TokenizerPromptTemplate(void)
 	const char* userPrompt	 = "Describe your theory.";
 
 	int32_t* tokens;
-	size_t	 tokenCount;
+	int32_t	 tokenCount;
 
 	lyTokenizerTokenizePrompt(&tokens, &tokenCount, pTokenizer, systemPrompt, userPrompt);
 

@@ -13,7 +13,7 @@ void lyModelCreateDefaultArgs(lyModelArgs* pArgs)
 	pArgs->multipleOf		 = 256;
 	pArgs->ffnDimMultiplier	 = -1.0f;
 	pArgs->normEps			 = 1e-5f;
-	pArgs->ropeTheta		 = 500000.0f;
+	pArgs->ropeTheta		 = 500000.0;
 	pArgs->maxSequenceLength = 2048;
 	pArgs->nRep				 = 0;
 	pArgs->headDim			 = pArgs->dim / pArgs->nHeads;

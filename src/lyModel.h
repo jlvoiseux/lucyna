@@ -30,7 +30,7 @@ typedef struct lyModelArgs
 	float	ffnDimMultiplier;
 	float	normEps;
 	bool	useScaledRope;
-	float	ropeTheta;
+	double	ropeTheta;
 	int32_t maxSequenceLength;
 	int32_t nRep;
 	int32_t headDim;

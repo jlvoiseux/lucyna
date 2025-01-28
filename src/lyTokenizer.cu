@@ -171,12 +171,10 @@ void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath)
 	lyTokenizer* pTokenizer = (lyTokenizer*)malloc(sizeof(lyTokenizer));
 	memset(pTokenizer, 0, sizeof(lyTokenizer));
 
-	// Compile regex
 	int		   errorcode;
 	PCRE2_SIZE erroroffset;
 	pTokenizer->splitRegex = pcre2_compile((PCRE2_SPTR) "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+", PCRE2_ZERO_TERMINATED, PCRE2_UTF | PCRE2_UCP, &errorcode, &erroroffset, NULL);
 
-	// Load base vocabulary
 	char vocabPath[1024];
 #ifdef _WIN32
 	sprintf_s(vocabPath, sizeof(vocabPath), "%s\\tokenizer.model", modelFolderPath);
@@ -190,7 +188,6 @@ void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath)
 		return;
 	}
 
-	// Count lines to determine vocabulary size
 	size_t baseVocabSize = 0;
 	char   line[1024];
 	while (fgets(line, sizeof(line), fp))
@@ -199,13 +196,11 @@ void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath)
 	}
 	rewind(fp);
 
-	// Allocate vocabulary arrays
 	size_t totalVocabSize = baseVocabSize + RESERVED_SPECIAL_TOKENS_COUNT;
 	pTokenizer->idToToken = (char**)malloc(totalVocabSize * sizeof(char*));
 	pTokenizer->tokenToId = (int32_t*)malloc(totalVocabSize * sizeof(int32_t));
 	pTokenizer->vocabSize = totalVocabSize;
 
-	// Load base vocabulary
 	size_t idx = 0;
 	while (fgets(line, sizeof(line), fp))
 	{
@@ -235,7 +230,6 @@ void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath)
 		pTokenizer->tokenToId[specialTokenBaseIdx + i] = specialTokenBaseIdx + i;
 	}
 
-	// Add remaining reserved tokens
 	for (size_t i = NUM_SPECIAL_TOKENS; i < RESERVED_SPECIAL_TOKENS_COUNT; i++)
 	{
 		char reserved[64];
@@ -330,7 +324,7 @@ void lyTokenizerTokenize(int32_t** ppTokens, size_t* pTokenCount, const lyTokeni
 	*ppTokens = (int32_t*)realloc(*ppTokens, sizeof(int32_t) * *pTokenCount);
 }
 
-void lyTokenizerTokenizePrompt(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt)
+void lyTokenizerTokenizePrompt(int32_t** ppTokens, int32_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt)
 {
 	size_t maxTokens = (systemPrompt ? strlen(systemPrompt) : 0) + (userPrompt ? strlen(userPrompt) : 0) * 2;
 	*ppTokens		 = (int32_t*)malloc(sizeof(int32_t) * maxTokens);
@@ -487,7 +481,7 @@ void lyTokenizerDecodeToken(char** ppStr, const lyTokenizer* pTokenizer, int32_t
 	*ppStr = strdup(pTokenizer->idToToken[tokenId]);
 }
 
-void lyTokenizerDecodeBatch(char** ppStr, const lyTokenizer* pTokenizer, const int32_t* tokens, size_t tokenCount)
+void lyTokenizerDecodeBatch(char** ppStr, const lyTokenizer* pTokenizer, const int32_t* tokens, int32_t tokenCount)
 {
 	size_t totalLen = 0;
 	for (size_t i = 0; i < tokenCount; i++)

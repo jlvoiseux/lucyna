@@ -66,16 +66,25 @@ void lyTorchRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount)
 	lyValueGetPtr(args[2], &shapeArrayPtr);
 	lyStack* shapeArray = (lyStack*)shapeArrayPtr;
 
-	lyTensor* pTensor;
-	int32_t*  shape = (int32_t*)malloc(sizeof(int32_t) * shapeArray->count);
+	int32_t* shape		   = (int32_t*)malloc(sizeof(int32_t) * shapeArray->count);
+	size_t	 totalElements = 1;
 	for (size_t i = 0; i < shapeArray->count; i++)
 	{
 		int64_t val;
 		lyValueGetInt(shapeArray->items[i], &val);
 		shape[i] = (int32_t)val;
+		totalElements *= shape[i];
 	}
-	lyTensorCreate(&pTensor, shape, (int32_t)shapeArray->count, (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset), NULL);
+
+	lyTensor* pTensor;
+	lyTensorCreate(&pTensor, shape, (int32_t)shapeArray->count, NULL, NULL);
 	free(shape);
+
+	nv_bfloat16* srcData = (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset);
+	for (size_t i = 0; i < totalElements; i++)
+	{
+		pTensor->data[i] = srcData[i];
+	}
 
 	*ppTensor = pTensor;
 }

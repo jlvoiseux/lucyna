@@ -33,6 +33,9 @@ target_link_libraries(lucyna_lib pcre2-8)
 
 add_executable(lucyna "src/main.cu")
 target_link_libraries(lucyna lucyna_lib)
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cu
+        "extern \"C\" __global__ void dummy_kernel() {}")
+target_sources(lucyna PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cu)
 
 set_target_properties(lucyna PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON

@@ -115,7 +115,7 @@ void lyModelLoaderLoadArgs(lyModel* pModel, const char* modelDir)
 		else if (strcmp(key, "norm_eps") == 0)
 			pModel->args.normEps = (float)atof(value);
 		else if (strcmp(key, "rope_theta") == 0)
-			pModel->args.ropeTheta = (float)atof(value);
+			pModel->args.ropeTheta = atof(value);
 		else if (strcmp(key, "use_scaled_rope") == 0)
 			pModel->args.useScaledRope = (strcmp(value, "true") == 0);
 	}

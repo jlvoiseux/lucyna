@@ -25,7 +25,7 @@ void lyTokenizerCreate(lyTokenizer** ppTokenizer, const char* modelFolderPath);
 void lyTokenizerDestroy(lyTokenizer* pTokenizer);
 
 void lyTokenizerTokenize(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* text, bool addBeginOfSentence);
-void lyTokenizerTokenizePrompt(int32_t** ppTokens, size_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt);
+void lyTokenizerTokenizePrompt(int32_t** ppTokens, int32_t* pTokenCount, const lyTokenizer* pTokenizer, const char* systemPrompt, const char* userPrompt);
 
 void lyTokenizerDecodeToken(char** ppStr, const lyTokenizer* pTokenizer, int32_t tokenId);
-void lyTokenizerDecodeBatch(char** ppStr, const lyTokenizer* pTokenizer, const int32_t* tokens, size_t tokenCount);
+void lyTokenizerDecodeBatch(char** ppStr, const lyTokenizer* pTokenizer, const int32_t* tokens, int32_t tokenCount);

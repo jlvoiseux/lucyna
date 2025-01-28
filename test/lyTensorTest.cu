@@ -36,7 +36,7 @@ void test_SetTensorData(void)
 	nv_bfloat16 hostData[4];
 	for (int i = 0; i < 4; i++)
 	{
-		hostData[i] = __float2bfloat16((float)i);
+		hostData[i] = (float)i;
 	}
 
 	lyTensorCreate(&pTensor, shape, 2, hostData, NULL);
@@ -49,7 +49,7 @@ void test_SetTensorData(void)
 	{
 		float expected = (float)i;
 		float actual;
-		TEST_ASSERT_TRUE(lyTensorGetItemAsFloat32(&actual, pTensor, i));
+		lyTensorGetItemRaw(&actual, pTensor, i);
 		TEST_ASSERT_FLOAT_WITHIN(0.01f, expected, actual);
 	}
 }
@@ -73,7 +73,7 @@ void test_TensorSlice(void)
 	nv_bfloat16 hostData[8];
 	for (int i = 0; i < 8; i++)
 	{
-		hostData[i] = __float2bfloat16((float)i);
+		hostData[i] = (float)i;
 	}
 
 	lyTensorCreate(&pTensor, shape, 2, hostData, NULL);
@@ -93,10 +93,10 @@ void test_TensorGetSetItem(void)
 	lyTensorCreate(&pTensor, shape, 2, NULL, NULL);
 
 	int32_t loc[] = {0, 1};
-	TEST_ASSERT_TRUE(lyTensorSetItem(pTensor, loc, 42));
+	lyTensorSetItem(pTensor, loc, 42);
 
-	int32_t value;
-	TEST_ASSERT_TRUE(lyTensorGetItem(&value, pTensor, loc));
+	float value;
+	lyTensorGetItem(&value, pTensor, loc);
 	TEST_ASSERT_EQUAL_INT32(42, value);
 }
 
@@ -104,10 +104,11 @@ void test_TensorGetSetFloat(void)
 {
 	int32_t shape[] = {2};
 	lyTensorCreate(&pTensor, shape, 1, NULL, NULL);
-	TEST_ASSERT_TRUE(lyTensorSetItemFromFloat32(pTensor, 0, 3.14f));
+	int32_t loc[] = {0};
+	lyTensorSetItem(pTensor, loc, 3.14f);
 
 	float value;
-	TEST_ASSERT_TRUE(lyTensorGetItemAsFloat32(&value, pTensor, 0));
+	lyTensorGetItem(&value, pTensor, loc);
 	TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.14f, value);
 }
 
@@ -115,10 +116,10 @@ void test_TensorComplexItem(void)
 {
 	int32_t shape[] = {2, 2};
 	lyTensorCreate(&pTensor, shape, 2, NULL, NULL);
-	TEST_ASSERT_TRUE(lyTensorSetComplexItem(pTensor, 0, 1, 1.0f, 2.0f));
+	lyTensorFloatSetComplexItem(pTensor, 0, 1, 1.0f, 2.0f);
 
 	float real, imag;
-	TEST_ASSERT_TRUE(lyTensorGetComplexItem(&real, &imag, pTensor, 0, 1));
+	lyTensorFloatGetComplexItem(&real, &imag, pTensor, 0, 1);
 	TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, real);
 	TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.0f, imag);
 }

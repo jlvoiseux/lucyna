@@ -10,8 +10,8 @@ static lyAttention* pAttention = NULL;
 
 void setUp(void)
 {
-	TEST_ASSERT_TRUE(lyModelLoaderLoadModel(&pModel, "../model-tuned", true, true));
-	TEST_ASSERT_TRUE(lyAttentionCreate(&pAttention, pModel, 0));
+	lyModelLoaderLoadModel(&pModel, "../model-tuned");
+	lyAttentionCreate(&pAttention, pModel, 0);
 }
 
 void tearDown(void)
@@ -38,21 +38,22 @@ void test_AttentionForward(void)
 	{
 		for (int j = 0; j < pModel->args.dim; j++)
 		{
-			float val = (float)(i * pModel->args.dim + j) / (float)(4 * pModel->args.dim);
-			TEST_ASSERT_TRUE(lyTensorSetItemFromFloat32(pInput, i * pModel->args.dim + j, val));
+			float	val	  = (float)(i * pModel->args.dim + j) / (float)(4 * pModel->args.dim);
+			int32_t loc[] = {i, j};
+			lyTensorSetItem(pInput, loc, val);
 		}
 	}
 
-	lyTensor* pFreqsCis;
-	TEST_ASSERT_TRUE(lyRopePrecomputeFreqsCis(&pFreqsCis, pModel->args.dim, 4096, 10000.0f));
+	lyTensorFloat* pFreqsCis;
+	lyRopePrecomputeFreqsCis(&pFreqsCis, pModel->args.dim, 4096, 10000.0f);
 
 	int32_t	  maskShape[] = {4, 4};
 	lyTensor* pMask;
 	lyTensorCreate(&pMask, maskShape, 2, NULL, NULL);
-	TEST_ASSERT_TRUE(lyTensorMakeTriangularMask(pMask));
+	lyTensorMakeTriangularMask(pMask);
 
 	lyTensor* pOutput;
-	TEST_ASSERT_TRUE(lyAttentionForward(&pOutput, pAttention, pInput, 0, pFreqsCis, pMask));
+	lyAttentionForward(&pOutput, pAttention, pInput, 0, pFreqsCis, pMask);
 
 	TEST_ASSERT_EQUAL_INT32(2, pOutput->rank);
 	TEST_ASSERT_EQUAL_INT32(4, pOutput->shape[0]);
@@ -64,7 +65,7 @@ void test_AttentionForward(void)
 
 	lyTensorDestroy(pOutput);
 	lyTensorDestroy(pMask);
-	lyTensorDestroy(pFreqsCis);
+	lyTensorFloatDestroy(pFreqsCis);
 	lyTensorDestroy(pInput);
 }
 

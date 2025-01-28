@@ -1,10 +1,11 @@
 #include "lyTensorMath.h"
 
 #include <cuda_bf16.h>
+#include <float.h>
 #include <math_constants.h>
 #include <stdio.h>
 
-__global__ void matMulKernel(const nv_bfloat16* A, const nv_bfloat16* B, nv_bfloat16* C, int m, int n, int k)
+__global__ void matMulKernel(const nv_bfloat16* A, const nv_bfloat16* B, float* C, int m, int n, int k)
 {
 	int row = blockIdx.y * blockDim.y + threadIdx.y;
 	int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -18,7 +19,7 @@ __global__ void matMulKernel(const nv_bfloat16* A, const nv_bfloat16* B, nv_bflo
 			float bVal = __bfloat162float(B[i * n + col]);
 			sum += aVal * bVal;
 		}
-		C[row * n + col] = __float2bfloat16(sum);
+		C[row * n + col] = sum;
 	}
 }
 
@@ -48,12 +49,15 @@ void lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 
 	size_t matrixSizeA = m * k * sizeof(nv_bfloat16);
 	size_t matrixSizeB = k * n * sizeof(nv_bfloat16);
-	size_t matrixSizeC = m * n * sizeof(nv_bfloat16);
+	size_t matrixSizeC = m * n * sizeof(float);	 // Float intermediate storage
 
-	nv_bfloat16 *d_A, *d_B, *d_C;
+	nv_bfloat16 *d_A, *d_B;
+	float*		 d_C;
 	cudaMalloc(&d_A, matrixSizeA);
 	cudaMalloc(&d_B, matrixSizeB);
 	cudaMalloc(&d_C, matrixSizeC);
+
+	float* tempOutput = (float*)malloc(matrixSizeC);
 
 	for (int32_t batch = 0; batch < batchSize; batch++)
 	{
@@ -67,9 +71,16 @@ void lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 		dim3 blockDim(16, 16);
 		dim3 gridDim((n + blockDim.x - 1) / blockDim.x, (m + blockDim.y - 1) / blockDim.y);
 		matMulKernel<<<gridDim, blockDim>>>(d_A, d_B, d_C, m, n, k);
-		cudaMemcpy(pBatchOut, d_C, matrixSizeC, cudaMemcpyDeviceToHost);
+
+		cudaMemcpy(tempOutput, d_C, matrixSizeC, cudaMemcpyDeviceToHost);
+
+		for (int i = 0; i < m * n; i++)
+		{
+			pBatchOut[i] = __float2bfloat16_rz(tempOutput[i]);
+		}
 	}
 
+	free(tempOutput);
 	cudaFree(d_A);
 	cudaFree(d_B);
 	cudaFree(d_C);
@@ -77,13 +88,13 @@ void lyTensorMatMul(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 	*ppOutput = pOutput;
 }
 
-__global__ void scaleAndAddKernel(const nv_bfloat16* A, const nv_bfloat16* B, nv_bfloat16* C, const int32_t* aStrides, const int32_t* bStrides, const int32_t* aShape, int32_t aRank, int32_t bRank, nv_bfloat16 alpha, nv_bfloat16 beta, int32_t totalElements)
+__global__ void scaleAndAddKernel(const nv_bfloat16* A, const nv_bfloat16* B, nv_bfloat16* C, const int32_t* aStrides, const int32_t* bStrides, const int32_t* aShape, int32_t aRank, int32_t bRank, float alpha, float beta, int32_t totalElements)
 {
 	int32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx >= totalElements)
 		return;
 
-	nv_bfloat16 aVal = __hmul(A[idx], alpha);
+	float aVal = __bfloat162float(A[idx]) * alpha;
 
 	if (B != NULL)
 	{
@@ -98,16 +109,15 @@ __global__ void scaleAndAddKernel(const nv_bfloat16* A, const nv_bfloat16* B, nv
 			temp %= aStrides[aRankOffset];
 		}
 
-		nv_bfloat16 bVal = __hmul(B[bIdx], beta);
-		C[idx]			 = __hadd(aVal, bVal);
+		C[idx] = __float2bfloat16_rz(aVal + __bfloat162float(B[bIdx]) * beta);
 	}
 	else
 	{
-		C[idx] = aVal;
+		C[idx] = __float2bfloat16_rz(aVal);
 	}
 }
 
-void lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB, float alpha, float beta)
+void lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB, nv_bfloat16 alpha, nv_bfloat16 beta)
 {
 	lyTensor* pOutput;
 	lyTensorCreate(&pOutput, pA->shape, pA->rank, NULL, NULL);
@@ -164,13 +174,12 @@ void lyTensorScaleAndAdd(lyTensor** ppOutput, const lyTensor* pA, const lyTensor
 		cudaMemcpy(d_bStrides, bStrides, pB->rank * sizeof(int32_t), cudaMemcpyHostToDevice);
 	}
 
-	nv_bfloat16 alphaBF16 = __float2bfloat16(alpha);
-	nv_bfloat16 betaBF16  = __float2bfloat16(beta);
-
 	int threadsPerBlock = 256;
 	int numBlocks		= (totalElements + threadsPerBlock - 1) / threadsPerBlock;
 
-	scaleAndAddKernel<<<numBlocks, threadsPerBlock>>>(d_A, d_B, d_C, d_aStrides, d_bStrides, d_aShape, pA->rank, pB ? pB->rank : 0, alphaBF16, betaBF16, totalElements);
+	float alphaF = __bfloat162float(alpha);
+	float betaF	 = __bfloat162float(beta);
+	scaleAndAddKernel<<<numBlocks, threadsPerBlock>>>(d_A, d_B, d_C, d_aStrides, d_bStrides, d_aShape, pA->rank, pB ? pB->rank : 0, alphaF, betaF, totalElements);
 
 	cudaMemcpy(pOutput->data, d_C, dataSizeA, cudaMemcpyDeviceToHost);
 
@@ -196,6 +205,21 @@ void lyTensorElementwiseMul(lyTensor** ppOutput, const lyTensor* pA, const lyTen
 	lyTensor* pOutput;
 	lyTensorCreate(&pOutput, pA->shape, pA->rank, NULL, NULL);
 
+	int32_t* aStrides = (int32_t*)malloc(pA->rank * sizeof(int32_t));
+	int32_t* bStrides = (int32_t*)malloc(pB->rank * sizeof(int32_t));
+
+	aStrides[pA->rank - 1] = 1;
+	for (int32_t i = pA->rank - 2; i >= 0; i--)
+	{
+		aStrides[i] = aStrides[i + 1] * pA->shape[i + 1];
+	}
+
+	bStrides[pB->rank - 1] = 1;
+	for (int32_t i = pB->rank - 2; i >= 0; i--)
+	{
+		bStrides[i] = bStrides[i + 1] * pB->shape[i + 1];
+	}
+
 	int32_t totalElements = 1;
 	for (int32_t i = 0; i < pA->rank; i++)
 	{
@@ -204,10 +228,22 @@ void lyTensorElementwiseMul(lyTensor** ppOutput, const lyTensor* pA, const lyTen
 
 	for (int32_t i = 0; i < totalElements; i++)
 	{
-		float aVal		 = __bfloat162float(pA->data[i]);
-		float bVal		 = __bfloat162float(pB->data[i]);
-		pOutput->data[i] = __float2bfloat16(aVal * bVal);
+		int32_t bIdx = 0;
+		int32_t temp = i;
+
+		for (int32_t j = 0; j < pB->rank; j++)
+		{
+			int32_t aRankOffset = pA->rank - pB->rank + j;
+			int32_t dimIdx		= (temp / aStrides[aRankOffset]) % pA->shape[aRankOffset];
+			bIdx += dimIdx * bStrides[j];
+			temp %= aStrides[aRankOffset];
+		}
+
+		pOutput->data[i] = __float2bfloat16_rz(__bfloat162float(pA->data[i]) * __bfloat162float(pB->data[bIdx]));
 	}
+
+	free(aStrides);
+	free(bStrides);
 
 	*ppOutput = pOutput;
 }
@@ -222,13 +258,14 @@ void lyTensorMakeTriangularMask(lyTensor* pTensor)
 		for (int32_t col = 0; col < cols; col++)
 		{
 			float val						= col <= row ? 0.0f : -HUGE_VALF;
-			pTensor->data[row * cols + col] = __float2bfloat16(val);
+			pTensor->data[row * cols + col] = __float2bfloat16_rz(val);
 		}
 	}
 }
 
-void lyTensorSoftmax(lyTensor** ppOutput, const lyTensor* pInput, int32_t dim)
+void lyTensorSoftmax(lyTensor** ppOutput, const lyTensor* pInput)
 {
+	int32_t	  dim = pInput->rank - 1;
 	lyTensor* pOutput;
 	lyTensorCreate(&pOutput, pInput->shape, pInput->rank, NULL, NULL);
 
@@ -238,108 +275,61 @@ void lyTensorSoftmax(lyTensor** ppOutput, const lyTensor* pInput, int32_t dim)
 	{
 		outerSize *= pInput->shape[i];
 	}
-	int32_t innerSize = 1;
-	for (int32_t i = dim + 1; i < pInput->rank; i++)
-	{
-		innerSize *= pInput->shape[i];
-	}
 
-	float* expValues = (float*)malloc(dimSize * sizeof(float));
 	for (int32_t i = 0; i < outerSize; i++)
 	{
-		for (int32_t k = 0; k < innerSize; k++)
+		int32_t rowOffset = i * dimSize;
+
+		float rowMax = -FLT_MAX;
+		for (int32_t j = 0; j < dimSize; j++)
 		{
-			float maxVal = -HUGE_VALF;
-			for (int32_t j = 0; j < dimSize; j++)
-			{
-				int32_t idx = i * dimSize * innerSize + j * innerSize + k;
-				float	val = __bfloat162float(pInput->data[idx]);
-				maxVal		= fmaxf(maxVal, val);
-			}
+			float val = __bfloat162float(pInput->data[rowOffset + j]);
+			if (val > rowMax)
+				rowMax = val;
+		}
 
-			float sum = 0.0f;
-			for (int32_t j = 0; j < dimSize; j++)
-			{
-				int32_t idx	 = i * dimSize * innerSize + j * innerSize + k;
-				float	val	 = __bfloat162float(pInput->data[idx]);
-				expValues[j] = expf(val - maxVal);
-				sum += expValues[j];
-			}
+		float rowExpSum = 0.0f;
+		for (int32_t j = 0; j < dimSize; j++)
+		{
+			float val = __bfloat162float(pInput->data[rowOffset + j]);
+			rowExpSum += expf(val - rowMax);
+		}
 
-			for (int32_t j = 0; j < dimSize; j++)
-			{
-				int32_t idx		   = i * dimSize * innerSize + j * innerSize + k;
-				pOutput->data[idx] = __float2bfloat16(expValues[j] / sum);
-			}
+		for (int32_t j = 0; j < dimSize; j++)
+		{
+			float val					 = __bfloat162float(pInput->data[rowOffset + j]);
+			float outVal				 = expf(val - rowMax) / rowExpSum;
+			pOutput->data[rowOffset + j] = __float2bfloat16_rz(outVal);
 		}
 	}
 
-	free(expValues);
 	*ppOutput = pOutput;
 }
 
-void lyTensorArgmax(lyTensor** ppOutput, const lyTensor* pInput, int32_t dim)
+void lyTensorArgmax(int32_t* pOutput, const lyTensor* pInput)
 {
-	int32_t* newShape	   = (int32_t*)malloc(sizeof(int32_t) * (pInput->rank - 1));
-	int32_t	 j			   = 0;
-	int32_t	 totalElements = 1;
-	for (int32_t i = 0; i < pInput->rank; i++)
+	if (pInput->rank > 2 || (pInput->rank == 2 && pInput->shape[0] != 1 && pInput->shape[1] != 1))
 	{
-		if (i != dim)
+		*pOutput = -1;
+		return;
+	}
+
+	int32_t vectorLength = pInput->rank == 1 ? pInput->shape[0] : (pInput->shape[0] == 1 ? pInput->shape[1] : pInput->shape[0]);
+
+	float	maxVal = -HUGE_VALF;
+	int32_t maxIdx = 0;
+
+	for (int32_t i = 0; i < vectorLength; i++)
+	{
+		float val = __bfloat162float(pInput->data[i]);
+		if (val > maxVal)
 		{
-			newShape[j++] = pInput->shape[i];
-			totalElements *= pInput->shape[i];
+			maxVal = val;
+			maxIdx = i;
 		}
 	}
 
-	lyTensor* pOutput;
-	lyTensorCreate(&pOutput, newShape, pInput->rank - 1, NULL, NULL);
-	free(newShape);
-
-	int32_t* strides		  = (int32_t*)malloc(sizeof(int32_t) * pInput->rank);
-	strides[pInput->rank - 1] = 1;
-	for (int32_t i = pInput->rank - 2; i >= 0; i--)
-	{
-		strides[i] = strides[i + 1] * pInput->shape[i + 1];
-	}
-
-	int32_t dimSize = pInput->shape[dim];
-	for (int32_t i = 0; i < totalElements; i++)
-	{
-		int32_t temp	 = i;
-		int32_t inputIdx = 0;
-		int32_t outDim	 = 0;
-
-		for (int32_t d = 0; d < pInput->rank; d++)
-		{
-			if (d != dim)
-			{
-				int32_t idx = temp % pInput->shape[d];
-				temp /= pInput->shape[d];
-				inputIdx += idx * strides[d];
-				outDim++;
-			}
-		}
-
-		float	maxVal = -HUGE_VALF;
-		int32_t maxIdx = 0;
-
-		for (int32_t d = 0; d < dimSize; d++)
-		{
-			int32_t idx = inputIdx + d * strides[dim];
-			float	val = __bfloat162float(pInput->data[idx]);
-			if (val > maxVal)
-			{
-				maxVal = val;
-				maxIdx = d;
-			}
-		}
-
-		pOutput->data[i] = __float2bfloat16((float)maxIdx);
-	}
-
-	free(strides);
-	*ppOutput = pOutput;
+	*pOutput = maxIdx;
 }
 
 void lyTensorOuter(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
@@ -354,40 +344,32 @@ void lyTensorOuter(lyTensor** ppOutput, const lyTensor* pA, const lyTensor* pB)
 		{
 			float aVal							= __bfloat162float(pA->data[i]);
 			float bVal							= __bfloat162float(pB->data[j]);
-			pOutput->data[i * pB->shape[0] + j] = __float2bfloat16(aVal * bVal);
+			pOutput->data[i * pB->shape[0] + j] = __float2bfloat16_rz(aVal * bVal);
 		}
 	}
 
 	*ppOutput = pOutput;
 }
 
-void lyTensorEmbedding(lyTensor** ppOutput, const lyTensor* pTokens, const lyTensor* pEmbeddings)
+void lyTensorEmbedding(lyTensor** ppOutput, const int32_t* pInputTokens, int32_t seqLen, const lyTensor* pEmbeddings)
 {
-	int32_t seqLen = pTokens->shape[0];
-	int32_t dim	   = pEmbeddings->shape[1];
-
-	lyTensor* pOutput;
-	int32_t	  outputShape[] = {seqLen, dim};
-	lyTensorCreate(&pOutput, outputShape, 2, NULL, NULL);
-
-	for (int32_t i = 0; i < seqLen; i++)
+	if (pEmbeddings->rank != 2)
 	{
-		float	tokenVal = __bfloat162float(pTokens->data[i]);
-		int32_t tokenId	 = (int32_t)tokenVal;
+		return;
+	}
 
-		if (tokenId < 0)
-		{
-			for (int32_t j = 0; j < dim; j++)
-			{
-				pOutput->data[i * dim + j] = __float2bfloat16(0.0f);
-			}
-			continue;
-		}
+	int32_t	  embeddingDim = pEmbeddings->shape[1];
+	lyTensor* pOutput;
+	int32_t	  outputShape[] = {seqLen, embeddingDim};
+	lyTensorCreate(&pOutput, outputShape, 2, NULL, NULL);
+	size_t rowSizeBytes = embeddingDim * sizeof(nv_bfloat16);
 
-		for (int32_t j = 0; j < dim; j++)
-		{
-			pOutput->data[i * dim + j] = pEmbeddings->data[tokenId * dim + j];
-		}
+	for (int32_t rowIdx = 0; rowIdx < seqLen; rowIdx++)
+	{
+		int32_t tokenId	  = pInputTokens[rowIdx];
+		size_t	srcOffset = tokenId * embeddingDim;
+		size_t	dstOffset = rowIdx * embeddingDim;
+		memcpy(pOutput->data + dstOffset, pEmbeddings->data + srcOffset, rowSizeBytes);
 	}
 
 	*ppOutput = pOutput;
@@ -448,11 +430,11 @@ void lyTensorTranspose(lyTensor** ppOutput, const lyTensor* pInput, const int32_
 		int32_t indices[3] = {0};
 		int32_t inputIdx = 0, outputIdx = 0;
 
-		for (int32_t i = 0; i < pInput->shape[0]; i++)	// seqLen
+		for (int32_t i = 0; i < pInput->shape[0]; i++)
 		{
-			for (int32_t j = 0; j < pInput->shape[1]; j++)	// nKVHeads
+			for (int32_t j = 0; j < pInput->shape[1]; j++)
 			{
-				for (int32_t k = 0; k < pInput->shape[2]; k++)	// headDim
+				for (int32_t k = 0; k < pInput->shape[2]; k++)
 				{
 					indices[0] = i;
 					indices[1] = j;

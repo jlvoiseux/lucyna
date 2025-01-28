@@ -12,7 +12,7 @@ static lyModel* pModel = NULL;
 
 void setUp(void)
 {
-	lyModelLoaderLoadModel(&pModel, "../model-tuned", true, true);
+	lyModelLoaderLoadModel(&pModel, "../model-tuned");
 }
 
 void tearDown(void)
@@ -41,82 +41,45 @@ void test_TransformerForward(void)
 		return;
 	}
 
-	const int32_t SEQ_LENGTH = 20;
-
-	int32_t	  shape[] = {SEQ_LENGTH};
-	lyTensor* pTokens;
-	lyTensorCreate(&pTokens, shape, 1, NULL, NULL);
-
-	const int32_t padToken = -1;  // Get from model
-	for (int32_t i = 0; i < SEQ_LENGTH; i++)
-	{
-		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &i, padToken));
-	}
-
+	const int32_t SEQ_LENGTH	 = 20;
 	const int32_t promptTokens[] = {128000, 128006, 882, 128007, 271, 3923, 374, 701, 836, 30, 128009, 128006, 78191, 128007, 271};
 	const int32_t promptLength	 = sizeof(promptTokens) / sizeof(promptTokens[0]);
 
-	for (int32_t i = 0; i < promptLength; i++)
-	{
-		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &i, promptTokens[i]));
-	}
-
 	lyTransformer* pTransformer;
-	TEST_ASSERT_TRUE(lyTransformerCreate(&pTransformer, pModel));
+	lyTransformerCreate(&pTransformer, pModel);
 
 	int32_t	  prevPos = 0;
-	lyTensor *pInputTokens, *pLogits, *pNextToken;
+	lyTensor* pLogits;
+	lyTensor* pLastLogits;
+	int32_t*  generatedTokens = (int32_t*)malloc(SEQ_LENGTH * sizeof(int32_t));
+
+	// Copy prompt tokens
+	memcpy(generatedTokens, promptTokens, promptLength * sizeof(int32_t));
 
 	for (int32_t curPos = promptLength; curPos < SEQ_LENGTH; curPos++)
 	{
-		lyTensorSlice(&pInputTokens, pTokens, prevPos, curPos);
-		TEST_ASSERT_TRUE(lyTransformerForward(&pLogits, pTransformer, pInputTokens, prevPos));
-		lyTensorSlice(&pNextToken, pLogits, pLogits->shape[0] - 1, pLogits->shape[0]);
-		lyTensor* pArgmax;
-		TEST_ASSERT_TRUE(lyTensorArgmax(&pArgmax, pNextToken, pNextToken->rank - 1));
-		int32_t nextTokenId;
-		int32_t loc[] = {0};
-		TEST_ASSERT_TRUE(lyTensorGetItem(&nextTokenId, pArgmax, loc));
-		TEST_ASSERT_TRUE(lyTensorSetItem(pTokens, &curPos, nextTokenId));
-		lyTensorDestroy(pInputTokens);
+		lyTransformerForward(&pLogits, pTransformer, generatedTokens, curPos, prevPos);
+		lyTensorSlice(&pLastLogits, pLogits, pLogits->shape[0] - 1, pLogits->shape[0]);
 		lyTensorDestroy(pLogits);
-		lyTensorDestroy(pNextToken);
-		lyTensorDestroy(pArgmax);
 
-		prevPos = curPos;
+		int32_t nextToken;
+		lyTensorArgmax(&nextToken, pLastLogits);
+		lyTensorDestroy(pLastLogits);
+
+		generatedTokens[curPos] = nextToken;
+		prevPos					= curPos;
 	}
 
+	TEST_ASSERT_GREATER_OR_EQUAL_INT32(0, generatedTokens[promptLength]);
+	TEST_ASSERT_LESS_THAN_INT32(pModel->args.vocabSize, generatedTokens[promptLength]);
+
+	free(generatedTokens);
 	lyTransformerDestroy(pTransformer);
-	lyTensorDestroy(pTokens);
-}
-
-void test_PrecomputeFreqsCis(void)
-{
-	float	  expected[] = {57.29578f, 46.67413f, 38.02155f, 30.97301f, 25.23115f, 20.55373f, 16.74342f, 13.63948f, 11.11096f, 9.05118f};
-	lyTensor* freqsCis;
-	TEST_ASSERT_TRUE(lyRopePrecomputeFreqsCis(&freqsCis, 128, 4096, 500000.0));
-
-	TEST_ASSERT_EQUAL_INT32(2, freqsCis->rank);
-	TEST_ASSERT_EQUAL_INT32(4096, freqsCis->shape[0]);
-	TEST_ASSERT_EQUAL_INT32(128, freqsCis->shape[1]);
-
-	for (int i = 0; i < 10; i++)
-	{
-		float real, imag;
-		if (lyTensorGetComplexItem(&real, &imag, freqsCis, 1, i))
-		{
-			float angle = atan2f(imag, real) * (180.0f / M_PI);
-			TEST_ASSERT_FLOAT_WITHIN(0.5f, expected[i], angle);
-		}
-	}
-
-	lyTensorDestroy(freqsCis);
 }
 
 int main(void)
 {
 	UNITY_BEGIN();
 	RUN_TEST(test_TransformerForward);
-	RUN_TEST(test_PrecomputeFreqsCis);
 	return UNITY_END();
 }

@@ -14,6 +14,7 @@ void lyTransformerBlockCreate(lyTransformerBlock** ppBlock, const lyModel* pMode
 	snprintf(attnNormName, sizeof(attnNormName), "layers.%d.attention_norm.weight", layerIndex);
 	lyModelGetTensor(&attnNormWeights, pModel, attnNormName);
 	lyRMSNormCreate(&pBlock->attnNorm, pModel->args.normEps, attnNormWeights);
+	lyTensorPrint(attnNormWeights);
 	lyAttentionCreate(&pBlock->attention, pModel, layerIndex);
 
 	lyTensor* ffnNormWeights;
@@ -40,7 +41,7 @@ void lyTransformerBlockDestroy(lyTransformerBlock* pBlock)
 	free(pBlock);
 }
 
-void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensor* pFreqsCis, lyTensor* pMask)
+void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensorDouble* pFreqsCis, lyTensor* pMask)
 {
 	lyTensorPrint(pInput);
 
@@ -54,7 +55,7 @@ void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, 
 	lyTensorPrint(pAttnOutput);
 
 	lyTensor* pResidual;
-	lyTensorScaleAndAdd(&pResidual, pInput, pAttnOutput, 1.f, 1.f);
+	lyTensorScaleAndAdd(&pResidual, pInput, pAttnOutput, __float2bfloat16_rz(1.f), __float2bfloat16_rz(1.f));
 	lyTensorDestroy(pAttnOutput);
 	lyTensorPrint(pResidual);
 
@@ -67,7 +68,7 @@ void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, 
 	lyTensorDestroy(normalizedResidual);
 	lyTensorPrint(ffnOutput);
 
-	lyTensorScaleAndAdd(ppOutput, pResidual, ffnOutput, 1.f, 1.f);
+	lyTensorScaleAndAdd(ppOutput, pResidual, ffnOutput, __float2bfloat16_rz(1.f), __float2bfloat16_rz(1.f));
 	lyTensorDestroy(ffnOutput);
 	lyTensorDestroy(pResidual);
 }

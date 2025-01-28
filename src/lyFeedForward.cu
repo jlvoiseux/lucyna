@@ -68,7 +68,7 @@ void lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward
 	for (int i = 0; i < totalElements; i++)
 	{
 		float val			= __bfloat162float(gateResult->data[i]);
-		gateResult->data[i] = __float2bfloat16(silu(val));
+		gateResult->data[i] = __float2bfloat16_rz(silu(val));
 	}
 	lyTensorPrint(gateResult);
 

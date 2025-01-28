@@ -29,5 +29,4 @@ typedef struct lyInference
 
 void lyInferenceCreate(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir);
 void lyInferenceDestroy(lyInference* pInference);
-void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, lyTensor* pInputTokens, int32_t startPos);
-void lyInferenceCreateInputTokens(lyTensor** ppTokens, const int32_t* tokenIds, int32_t tokenCount);
+void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, int32_t* pTokens, int32_t* pTokenCount, int32_t startPos);

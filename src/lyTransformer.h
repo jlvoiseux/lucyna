@@ -15,10 +15,10 @@ typedef struct lyTransformer
 	lyRMSNorm*			 norm;
 	lyTensor*			 output;
 
-	lyTensor* freqsCis;
+	lyTensorDouble* freqsCis;
 } lyTransformer;
 
 void lyTransformerCreate(lyTransformer** ppTransformer, const lyModel* pModel);
 void lyTransformerDestroy(lyTransformer* pTransformer);
 
-void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, lyTensor* pTokens, int32_t startPos);
+void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, const int32_t* pInputTokens, int32_t seqLen, int32_t startPos);

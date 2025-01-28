@@ -52,24 +52,26 @@ int main(int argc, char** argv)
 	lyInference* pInference;
 	lyInferenceCreate(&pInference, pModel, 50, logCallback, argv[1]);
 
-	int32_t* tokenIds	= NULL;
-	size_t	 tokenCount = 0;
-	lyTokenizerTokenizePrompt(&tokenIds, &tokenCount, pInference->tokenizer, "You are Einstein", "Describe your theory.");
+	int32_t* pTokenIds;
+	int32_t	 tokenCount;
+	lyTokenizerTokenizePrompt(&pTokenIds, &tokenCount, pInference->tokenizer, "Tu es de Gaulle", "Parle de Trump.");
 
-	lyTensor* pInputTokens;
-	lyInferenceCreateInputTokens(&pInputTokens, tokenIds, tokenCount);
-	free(tokenIds);
+	// Create padded token array
+	int32_t* paddedTokens = (int32_t*)malloc(pInference->sequenceLength * sizeof(int32_t));
+	for (int32_t i = 0; i < pInference->sequenceLength; i++)
+	{
+		paddedTokens[i] = pInference->tokenizer->padId;
+	}
+	memcpy(paddedTokens, pTokenIds, tokenCount * sizeof(int32_t));
 
 	int					   startPos = 0;
 	lyGenerationStepResult result;
+	int32_t				   currentCount = tokenCount;
 
 	while (true)
 	{
-		lyInferenceGenerateNextToken(&result, pInference, pInputTokens, startPos);
-
-		lyTensorDestroy(pInputTokens);
-		lyInferenceCreateInputTokens(&pInputTokens, &result.tokenId, 1);
-		startPos++;
+		lyInferenceGenerateNextToken(&result, pInference, paddedTokens, &currentCount, startPos);
+		startPos = currentCount - 1;
 
 		char* decodedText = NULL;
 		lyTokenizerDecodeToken(&decodedText, pInference->tokenizer, result.tokenId);
@@ -84,10 +86,13 @@ int main(int argc, char** argv)
 		}
 	}
 
-	lyTensorDestroy(pInputTokens);
+	free(paddedTokens);
+
 	lyInferenceDestroy(pInference);
 	lyModelLoaderDestroyModel(pModel);
 	printf("\nModel freed successfully!\n");
+
+	free(pTokenIds);
 
 	return 0;
 }
