@@ -36,7 +36,7 @@ int main(int argc, char** argv)
 
 	int32_t* pTokenIds;
 	int32_t	 tokenCount;
-	lyTokenizerTokenizePrompt(&pTokenIds, &tokenCount, pInference->tokenizer, "You are a tobacco treatment specialist.", "How can I convince ny friend to stop smoking?");
+	lyTokenizerTokenizePrompt(&pTokenIds, &tokenCount, pInference->tokenizer, "You are a tobacco treatment specialist.", "How can I convince my friend to stop smoking?");
 
 	int32_t* paddedTokens = (int32_t*)malloc(pInference->sequenceLength * sizeof(int32_t));
 	for (int32_t i = 0; i < pInference->sequenceLength; i++)
