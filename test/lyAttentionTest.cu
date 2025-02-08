@@ -44,7 +44,7 @@ void test_AttentionForward(void)
 		}
 	}
 
-	lyTensorFloat* pFreqsCis;
+	lyTensorDouble* pFreqsCis;
 	lyRopePrecomputeFreqsCis(&pFreqsCis, pModel->args.dim, 4096, 10000.0f);
 
 	int32_t	  maskShape[] = {4, 4};
@@ -65,7 +65,7 @@ void test_AttentionForward(void)
 
 	lyTensorDestroy(pOutput);
 	lyTensorDestroy(pMask);
-	lyTensorFloatDestroy(pFreqsCis);
+	lyTensorDoubleDestroy(pFreqsCis);
 	lyTensorDestroy(pInput);
 }
 

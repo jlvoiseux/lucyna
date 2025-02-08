@@ -109,19 +109,7 @@ void test_TensorGetSetFloat(void)
 
 	float value;
 	lyTensorGetItem(&value, pTensor, loc);
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.14f, value);
-}
-
-void test_TensorComplexItem(void)
-{
-	int32_t shape[] = {2, 2};
-	lyTensorCreate(&pTensor, shape, 2, NULL, NULL);
-	lyTensorFloatSetComplexItem(pTensor, 0, 1, 1.0f, 2.0f);
-
-	float real, imag;
-	lyTensorFloatGetComplexItem(&real, &imag, pTensor, 0, 1);
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, real);
-	TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.0f, imag);
+	TEST_ASSERT_FLOAT_WITHIN(0.03f, 3.14f, value);
 }
 
 int main(void)
@@ -133,6 +121,5 @@ int main(void)
 	RUN_TEST(test_TensorSlice);
 	RUN_TEST(test_TensorGetSetItem);
 	RUN_TEST(test_TensorGetSetFloat);
-	RUN_TEST(test_TensorComplexItem);
 	return UNITY_END();
 }

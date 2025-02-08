@@ -5,24 +5,6 @@
 
 #include <stdio.h>
 
-static bool getInput(char* buffer)
-{
-	printf("%s", "Enter your message (or press enter to quit): ");
-	fflush(stdout);
-	if (!fgets(buffer, 2048, stdin))
-	{
-		return false;
-	}
-
-	size_t len = strlen(buffer);
-	if (len > 0 && buffer[len - 1] == '\n')
-	{
-		buffer[len - 1] = '\0';
-	}
-
-	return true;
-}
-
 static bool logCallback(const char* format, ...)
 {
 	va_list args;
@@ -50,13 +32,12 @@ int main(int argc, char** argv)
 	printf("Model loaded successfully.\n\n");
 
 	lyInference* pInference;
-	lyInferenceCreate(&pInference, pModel, 50, logCallback, argv[1]);
+	lyInferenceCreate(&pInference, pModel, 200, logCallback, argv[1]);
 
 	int32_t* pTokenIds;
 	int32_t	 tokenCount;
-	lyTokenizerTokenizePrompt(&pTokenIds, &tokenCount, pInference->tokenizer, "Tu es de Gaulle", "Parle de Trump.");
+	lyTokenizerTokenizePrompt(&pTokenIds, &tokenCount, pInference->tokenizer, "You are a tobacco treatment specialist.", "How can I convince ny friend to stop smoking?");
 
-	// Create padded token array
 	int32_t* paddedTokens = (int32_t*)malloc(pInference->sequenceLength * sizeof(int32_t));
 	for (int32_t i = 0; i < pInference->sequenceLength; i++)
 	{
