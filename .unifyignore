@@ -13,3 +13,4 @@ model.bin
 tokenizer.bin
 bin/*
 README.md
+build/*

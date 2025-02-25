@@ -5,6 +5,8 @@
 #include "lyTokenizer.h"
 #include "lyTransformer.h"
 
+#include <lyOpenCL.h>
+
 typedef enum lyGenerationState
 {
 	GSInProgress			   = 1,
@@ -25,8 +27,10 @@ typedef struct lyInference
 	lyTokenizer*   tokenizer;
 	int32_t		   sequenceLength;
 	bool (*logFn)(const char* format, ...);
+	lyOpenCLContext* openCLContext;
 } lyInference;
 
-void lyInferenceCreate(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir);
+void lyInferenceCreate(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir, lyOpenCLContext* pContext);
+
 void lyInferenceDestroy(lyInference* pInference);
 void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* pInference, int32_t* pTokens, int32_t* pTokenCount, int32_t startPos);

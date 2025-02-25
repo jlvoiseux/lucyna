@@ -1,18 +1,18 @@
 #include "lyRMSNorm.h"
+
 #include "lyTensorMath.h"
 
-#include <cuda_bf16.h>
-#include <float.h>
-#include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 
-void lyRMSNormCreate(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights)
+void lyRMSNormCreate(lyRMSNorm** ppNorm, float epsilon, lyTensor* pWeights, lyOpenCLContext* pContext)
 {
 	lyRMSNorm* pNorm = (lyRMSNorm*)malloc(sizeof(lyRMSNorm));
 
-	pNorm->epsilon = epsilon;
-	pNorm->weights = pWeights;
-	*ppNorm		   = pNorm;
+	pNorm->epsilon		 = epsilon;
+	pNorm->weights		 = pWeights;
+	*ppNorm				 = pNorm;
+	pNorm->openCLContext = pContext;
 }
 
 void lyRMSNormDestroy(lyRMSNorm* pNorm)
@@ -34,8 +34,8 @@ static bool doNormalization(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTenso
 	{
 		for (int dimIdx = 0; dimIdx < dim; dimIdx++)
 		{
-			float val							 = __bfloat162float(pInput->data[seqIdx * dim + dimIdx]);
-			squared->data[seqIdx * dim + dimIdx] = float((double)val * (double)val);
+			float val							 = lyBfloat16ToFloat32(pInput->data[seqIdx * dim + dimIdx]);
+			squared->data[seqIdx * dim + dimIdx] = (float)((double)val * (double)val);
 		}
 	}
 
@@ -77,8 +77,8 @@ static bool doNormalization(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTenso
 		float scale = invStd->data[seqIdx];
 		for (int dimIdx = 0; dimIdx < dim; dimIdx++)
 		{
-			float val								 = __bfloat162float(pInput->data[seqIdx * dim + dimIdx]);
-			(*ppOutput)->data[seqIdx * dim + dimIdx] = __float2bfloat16_rz(val * scale);
+			float val								 = lyBfloat16ToFloat32(pInput->data[seqIdx * dim + dimIdx]);
+			(*ppOutput)->data[seqIdx * dim + dimIdx] = lyFloat32ToBfloat16(val * scale);
 		}
 	}
 	lyTensorFloatDestroy(invStd);
@@ -92,7 +92,7 @@ void lyRMSNormForward(lyTensor** ppOutput, const lyRMSNorm* pNorm, lyTensor* pIn
 	doNormalization(&h, pNorm, pInput);
 	lyTensorPrint(h);
 
-	lyTensorElementwiseMul(ppOutput, h, pNorm->weights);
+	lyTensorElementwiseMul(ppOutput, h, pNorm->weights, pNorm->openCLContext);
 	lyTensorPrint(*ppOutput);
 
 	lyTensorDestroy(h);

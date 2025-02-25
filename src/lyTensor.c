@@ -1,6 +1,7 @@
 #include "lyTensor.h"
 
 #include <float.h>
+#include <lyBfloat16.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,10 +28,10 @@ static size_t calculateSize(const int32_t* pShape, int32_t rank)
 	{
 		size *= pShape[i];
 	}
-	return size * sizeof(nv_bfloat16);
+	return size * sizeof(lyBfloat16);
 }
 
-void lyTensorCreate(lyTensor** ppTensor, const int32_t* pShape, int32_t rank, const nv_bfloat16* pData, const char* name)
+void lyTensorCreate(lyTensor** ppTensor, const int32_t* pShape, int32_t rank, const lyBfloat16* pData, const char* name)
 {
 	lyTensor* pTensor = (lyTensor*)malloc(sizeof(lyTensor));
 	memset(pTensor, 0, sizeof(lyTensor));
@@ -43,7 +44,7 @@ void lyTensorCreate(lyTensor** ppTensor, const int32_t* pShape, int32_t rank, co
 		pTensor->rank  = rank;
 
 		size_t		 dataSize = calculateSize(pShape, rank);
-		nv_bfloat16* newData  = (nv_bfloat16*)malloc(dataSize);
+		lyBfloat16* newData  = (lyBfloat16*)malloc(dataSize);
 		if (pData)
 			memcpy(newData, pData, dataSize);
 		else
@@ -121,23 +122,23 @@ void lyTensorSlice(lyTensor** ppOutput, const lyTensor* pInput, int32_t startIdx
 void lyTensorSetItem(lyTensor* pTensor, const int32_t* pLoc, float value)
 {
 	int32_t index		 = calculateIndex(pTensor, pLoc);
-	pTensor->data[index] = __float2bfloat16_rz(value);
+	pTensor->data[index] = lyFloat32ToBfloat16(value);
 }
 
 void lyTensorGetItem(float* pValue, const lyTensor* pTensor, const int32_t* pLoc)
 {
 	int32_t index = calculateIndex(pTensor, pLoc);
-	*pValue		  = __bfloat162float(pTensor->data[index]);
+	*pValue		  = lyBfloat16ToFloat32(pTensor->data[index]);
 }
 
 void lyTensorSetItemRaw(lyTensor* pTensor, int32_t index, float value)
 {
-	pTensor->data[index] = __float2bfloat16_rz(value);
+	pTensor->data[index] = lyFloat32ToBfloat16(value);
 }
 
 void lyTensorGetItemRaw(float* pValue, const lyTensor* pTensor, int32_t index)
 {
-	*pValue = __bfloat162float(pTensor->data[index]);
+	*pValue = lyBfloat16ToFloat32(pTensor->data[index]);
 }
 
 void lyTensorPrint(const lyTensor* pTensor)
@@ -192,7 +193,7 @@ void lyTensorPrint(const lyTensor* pTensor)
 
 	for (size_t i = 0; i < totalElements; i++)
 	{
-		float val = __bfloat162float(pTensor->data[i]);
+		float val = lyBfloat16ToFloat32(pTensor->data[i]);
 		if (isinf(val))
 		{
 			if (val > 0)
@@ -218,7 +219,7 @@ void lyTensorPrint(const lyTensor* pTensor)
 		float variance = 0.0f;
 		for (size_t i = 0; i < totalElements; i++)
 		{
-			float val = __bfloat162float(pTensor->data[i]);
+			float val = lyBfloat16ToFloat32(pTensor->data[i]);
 			if (!isinf(val))
 			{
 				float diff = val - mean;
@@ -248,7 +249,7 @@ void lyTensorPrint(const lyTensor* pTensor)
 	printf("First 5 elements: [");
 	for (size_t i = 0; i < fmin(5, totalElements); i++)
 	{
-		float val = __bfloat162float(pTensor->data[i]);
+		float val = lyBfloat16ToFloat32(pTensor->data[i]);
 		if (isinf(val))
 		{
 			if (val > 0)
@@ -268,7 +269,7 @@ void lyTensorPrint(const lyTensor* pTensor)
 	printf("Last 5 elements: [");
 	for (size_t i = fmax(0, totalElements - 5); i < totalElements; i++)
 	{
-		float val = __bfloat162float(pTensor->data[i]);
+		float val = lyBfloat16ToFloat32(pTensor->data[i]);
 		if (isinf(val))
 		{
 			if (val > 0)

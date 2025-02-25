@@ -3,6 +3,7 @@
 #include "lyModelLoader.h"
 #include "lyUtil.h"
 
+#include <lyOpenCL.h>
 #include <stdio.h>
 
 static bool logCallback(const char* format, ...)
@@ -24,7 +25,15 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	lyUtilPrintDeviceInfo();
+	lyOpenCLContext* pOpenCLContext;
+	lyOpenCLInit(&pOpenCLContext);
+	if (!pOpenCLContext || !pOpenCLContext->initialized)
+	{
+		printf("Failed to initialize OpenCL context. Exiting.\n");
+		return 1;
+	}
+
+	lyOpenCLPrintDeviceInfo(pOpenCLContext);
 
 	lyModel* pModel;
 	lyModelLoaderLoadModel(&pModel, argv[1]);
@@ -32,7 +41,7 @@ int main(int argc, char** argv)
 	printf("Model loaded successfully.\n\n");
 
 	lyInference* pInference;
-	lyInferenceCreate(&pInference, pModel, 200, logCallback, argv[1]);
+	lyInferenceCreate(&pInference, pModel, 200, logCallback, argv[1], pOpenCLContext);
 
 	int32_t* pTokenIds;
 	int32_t	 tokenCount;
@@ -71,6 +80,7 @@ int main(int argc, char** argv)
 
 	lyInferenceDestroy(pInference);
 	lyModelLoaderDestroyModel(pModel);
+	lyOpenCLDestroy(pOpenCLContext);
 	printf("\nModel freed successfully!\n");
 
 	free(pTokenIds);

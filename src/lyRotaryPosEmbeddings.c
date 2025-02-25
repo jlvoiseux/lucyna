@@ -1,13 +1,15 @@
 #include "lyRotaryPosEmbeddings.h"
+
 #include "lyTensorMath.h"
 
+#include <math.h>
 #include <stdio.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846264338327950288419716939937510582097494459
 #endif
 
-void lyRopePrecomputeFreqsCis(lyTensorDouble** ppOut, int32_t dim, int32_t end, double theta)
+void lyRopePrecomputeFreqsCis(lyTensorDouble** ppOut, int32_t dim, int32_t end, double theta, lyOpenCLContext* pOpenCLContext)
 {
 	lyTensor* freqs;
 	int32_t	  freqsShape[] = {dim / 2};
@@ -16,8 +18,8 @@ void lyRopePrecomputeFreqsCis(lyTensorDouble** ppOut, int32_t dim, int32_t end, 
 	for (int32_t i = 0; i < dim / 2; i++)
 	{
 		float val	   = (float)(2 * i);
-		float freq	   = (float)(1.0 / pow(theta, (double)(val / dim)));
-		freqs->data[i] = __float2bfloat16_rz(freq);
+		float freq	   = 1.0 / pow(theta, val / dim);
+		freqs->data[i] = lyFloat32ToBfloat16(freq);
 	}
 	lyTensorPrint(freqs);
 
@@ -26,13 +28,13 @@ void lyRopePrecomputeFreqsCis(lyTensorDouble** ppOut, int32_t dim, int32_t end, 
 	lyTensorCreate(&t, tShape, 1, NULL, NULL);
 	for (int32_t i = 0; i < end; i++)
 	{
-		t->data[i] = __float2bfloat16_rz((float)i);
+		t->data[i] = lyFloat32ToBfloat16((float)i);
 	}
 	lyTensorPrint(t);
 
 	for (int32_t i = 0; i < dim / 2; i++)
 	{
-		float freq = __bfloat162float(freqs->data[i]);
+		float freq = lyBfloat16ToFloat32(freqs->data[i]);
 
 		float wavelen = 2.0 * M_PI / (double)freq;
 
@@ -57,13 +59,13 @@ void lyRopePrecomputeFreqsCis(lyTensorDouble** ppOut, int32_t dim, int32_t end, 
 			freq		 = (1.0f - smooth) * freq / scaleFactor + smooth * freq;
 		}
 
-		freqs->data[i] = __float2bfloat16_rz(freq);
+		freqs->data[i] = lyFloat32ToBfloat16(freq);
 	}
 
 	lyTensorPrint(freqs);
 
 	lyTensor* outerProduct;
-	lyTensorOuter(&outerProduct, t, freqs);
+	lyTensorOuter(&outerProduct, t, freqs, pOpenCLContext);
 	lyTensorPrint(outerProduct);
 
 	lyTensorDouble* out;
@@ -74,7 +76,7 @@ void lyRopePrecomputeFreqsCis(lyTensorDouble** ppOut, int32_t dim, int32_t end, 
 	{
 		for (int32_t j = 0; j < dim / 2; j++)
 		{
-			float	angle		   = __bfloat162float(outerProduct->data[i * (dim / 2) + j]);
+			float	angle		   = lyBfloat16ToFloat32(outerProduct->data[i * (dim / 2) + j]);
 			int32_t baseIdx		   = i * dim + 2 * j;
 			out->data[baseIdx]	   = cos(angle);
 			out->data[baseIdx + 1] = sin(angle);
@@ -108,15 +110,15 @@ void lyRopeApplyEmbeddings(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pXQ
 			for (int dim = 0; dim < headDim / 2; dim++)
 			{
 				int	   inIdxQ  = pos * numHeadsQ * headDim + head * headDim + 2 * dim;
-				double xq_real = __bfloat162float(pXQ->data[inIdxQ]);
-				double xq_imag = __bfloat162float(pXQ->data[inIdxQ + 1]);
+				double xq_real = lyBfloat16ToFloat32(pXQ->data[inIdxQ]);
+				double xq_imag = lyBfloat16ToFloat32(pXQ->data[inIdxQ + 1]);
 
 				int	   freqsIdx = pos * headDim + 2 * dim;
 				double cos_val	= pFreqsCis->data[freqsIdx];
 				double sin_val	= pFreqsCis->data[freqsIdx + 1];
 
-				pXQOut->data[inIdxQ]	 = __float2bfloat16_rz(xq_real * cos_val - xq_imag * sin_val);
-				pXQOut->data[inIdxQ + 1] = __float2bfloat16_rz(xq_real * sin_val + xq_imag * cos_val);
+				pXQOut->data[inIdxQ]	 = lyFloat32ToBfloat16(xq_real * cos_val - xq_imag * sin_val);
+				pXQOut->data[inIdxQ + 1] = lyFloat32ToBfloat16(xq_real * sin_val + xq_imag * cos_val);
 			}
 		}
 
@@ -125,15 +127,15 @@ void lyRopeApplyEmbeddings(lyTensor** ppXQOut, lyTensor** ppXKOut, lyTensor* pXQ
 			for (int dim = 0; dim < headDim / 2; dim++)
 			{
 				int	   inIdxK  = pos * numHeadsK * headDim + head * headDim + 2 * dim;
-				double xk_real = __bfloat162float(pXK->data[inIdxK]);
-				double xk_imag = __bfloat162float(pXK->data[inIdxK + 1]);
+				double xk_real = lyBfloat16ToFloat32(pXK->data[inIdxK]);
+				double xk_imag = lyBfloat16ToFloat32(pXK->data[inIdxK + 1]);
 
 				int	   freqsIdx = pos * headDim + 2 * dim;
 				double cos_val	= pFreqsCis->data[freqsIdx];
 				double sin_val	= pFreqsCis->data[freqsIdx + 1];
 
-				pXKOut->data[inIdxK]	 = __float2bfloat16_rz(xk_real * cos_val - xk_imag * sin_val);
-				pXKOut->data[inIdxK + 1] = __float2bfloat16_rz(xk_real * sin_val + xk_imag * cos_val);
+				pXKOut->data[inIdxK]	 = lyFloat32ToBfloat16(xk_real * cos_val - xk_imag * sin_val);
+				pXKOut->data[inIdxK + 1] = lyFloat32ToBfloat16(xk_real * sin_val + xk_imag * cos_val);
 			}
 		}
 	}

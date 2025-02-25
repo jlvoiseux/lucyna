@@ -1,10 +1,6 @@
-// test/lyTensorTest.cu
-
 #include "lyTensor.h"
-#include "lyTensorMath.h"
-#include "unity.h"
 
-#include <cuda_runtime.h>
+#include "unity.h"
 
 static lyTensor* pTensor = NULL;
 
@@ -32,11 +28,11 @@ void test_SetTensorShape(void)
 
 void test_SetTensorData(void)
 {
-	int32_t		shape[] = {2, 2};
-	nv_bfloat16 hostData[4];
+	int32_t	   shape[] = {2, 2};
+	lyBfloat16 hostData[4];
 	for (int i = 0; i < 4; i++)
 	{
-		hostData[i] = (float)i;
+		hostData[i] = lyFloat32ToBfloat16((float)i);
 	}
 
 	lyTensorCreate(&pTensor, shape, 2, hostData, NULL);
@@ -69,11 +65,11 @@ void test_ReshapeTensor(void)
 
 void test_TensorSlice(void)
 {
-	int32_t		shape[] = {4, 2};
-	nv_bfloat16 hostData[8];
+	int32_t	   shape[] = {4, 2};
+	lyBfloat16 hostData[8];
 	for (int i = 0; i < 8; i++)
 	{
-		hostData[i] = (float)i;
+		hostData[i] = lyFloat32ToBfloat16((float)i);
 	}
 
 	lyTensorCreate(&pTensor, shape, 2, hostData, NULL);
@@ -97,7 +93,7 @@ void test_TensorGetSetItem(void)
 
 	float value;
 	lyTensorGetItem(&value, pTensor, loc);
-	TEST_ASSERT_EQUAL_INT32(42, value);
+	TEST_ASSERT_EQUAL_FLOAT(42.0f, value);
 }
 
 void test_TensorGetSetFloat(void)

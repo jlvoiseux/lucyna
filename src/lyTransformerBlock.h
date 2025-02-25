@@ -14,9 +14,11 @@ typedef struct lyTransformerBlock
 
 	lyAttention*   attention;
 	lyFeedForward* feedForward;
-} lyLlamaTransformerBlock;
 
-void lyTransformerBlockCreate(lyTransformerBlock** ppBlock, const lyModel* pModel, int32_t layerIndex);
+	lyOpenCLContext* openCLContext;
+} lyTransformerBlock;
+
+void lyTransformerBlockCreate(lyTransformerBlock** ppBlock, const lyModel* pModel, int32_t layerIndex, lyOpenCLContext* pContext);
 void lyTransformerBlockDestroy(lyTransformerBlock* pBlock);
 
 void lyTransformerBlockForward(lyTensor** ppOutput, lyTransformerBlock* pBlock, lyTensor* pInput, int32_t startPos, lyTensorDouble* pFreqsCis, lyTensor* pMask);

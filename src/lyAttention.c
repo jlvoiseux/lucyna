@@ -1,21 +1,24 @@
 #include "lyAttention.h"
+
 #include "lyRotaryPosEmbeddings.h"
 #include "lyTensorMath.h"
 
 #include <assert.h>
-#include <cuda_bf16.h>
+#include <lyBfloat16.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-void lyAttentionCreate(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex)
+void lyAttentionCreate(lyAttention** ppAttention, const lyModel* pModel, int32_t layerIndex, lyOpenCLContext* pContext)
 {
 	lyAttention* pAttention = (lyAttention*)malloc(sizeof(lyAttention));
 
-	pAttention->layerIndex = layerIndex;
-	pAttention->nHeads	   = pModel->args.nHeads;
-	pAttention->nKVHeads   = pModel->args.nKVHeads;
-	pAttention->nRep	   = pModel->args.nRep;
-	pAttention->headDim	   = pModel->args.headDim;
+	pAttention->layerIndex	  = layerIndex;
+	pAttention->nHeads		  = pModel->args.nHeads;
+	pAttention->nKVHeads	  = pModel->args.nKVHeads;
+	pAttention->nRep		  = pModel->args.nRep;
+	pAttention->headDim		  = pModel->args.headDim;
+	pAttention->openCLContext = pContext;
 
 	char	tensorName[64];
 	int32_t perm[] = {1, 0};
@@ -23,22 +26,22 @@ void lyAttentionCreate(lyAttention** ppAttention, const lyModel* pModel, int32_t
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wq.weight", layerIndex);
 	lyTensor* modelWQ;
 	lyModelGetTensor(&modelWQ, pModel, tensorName);
-	lyTensorTranspose(&pAttention->attnWQ, modelWQ, perm);
+	lyTensorTranspose(&pAttention->attnWQ, modelWQ, perm, pContext);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wk.weight", layerIndex);
 	lyTensor* modelWK;
 	lyModelGetTensor(&modelWK, pModel, tensorName);
-	lyTensorTranspose(&pAttention->attnWK, modelWK, perm);
+	lyTensorTranspose(&pAttention->attnWK, modelWK, perm, pContext);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wv.weight", layerIndex);
 	lyTensor* modelWV;
 	lyModelGetTensor(&modelWV, pModel, tensorName);
-	lyTensorTranspose(&pAttention->attnWV, modelWV, perm);
+	lyTensorTranspose(&pAttention->attnWV, modelWV, perm, pContext);
 
 	snprintf(tensorName, sizeof(tensorName), "layers.%d.attention.wo.weight", layerIndex);
 	lyTensor* modelWO;
 	lyModelGetTensor(&modelWO, pModel, tensorName);
-	lyTensorTranspose(&pAttention->attnWO, modelWO, perm);
+	lyTensorTranspose(&pAttention->attnWO, modelWO, perm, pContext);
 
 	int32_t	  cacheShape[] = {pModel->args.maxSequenceLength, pModel->args.nKVHeads, pModel->args.headDim};
 	lyTensor* pCacheK;
@@ -88,7 +91,7 @@ void lyRepeatKV(lyTensor** ppOutput, lyTensor* pInput, int32_t nRep)
 			for (int32_t rep = 0; rep < nRep; rep++)
 			{
 				size_t dstOffset = ((i * nKVHeads + j) * nRep + rep) * headDim;
-				memcpy(pIntermediate->data + dstOffset, pInput->data + srcOffset, headDim * sizeof(nv_bfloat16));
+				memcpy(pIntermediate->data + dstOffset, pInput->data + srcOffset, headDim * sizeof(lyBfloat16));
 			}
 		}
 	}
@@ -108,10 +111,10 @@ void lyUpdateKVCache(lyAttention* pAttention, lyTensor* pK, lyTensor* pV, int32_
 	int32_t elementsPerPos = pAttention->nKVHeads * pAttention->headDim;
 	size_t	offsetElements = startPos * elementsPerPos;
 	size_t	copyElements   = seqLen * elementsPerPos;
-	size_t	copyBytes	   = copyElements * sizeof(nv_bfloat16);
+	size_t	copyBytes	   = copyElements * sizeof(lyBfloat16);
 
-	nv_bfloat16* kDst = pAttention->cacheK->data + offsetElements;
-	nv_bfloat16* vDst = pAttention->cacheV->data + offsetElements;
+	lyBfloat16* kDst = pAttention->cacheK->data + offsetElements;
+	lyBfloat16* vDst = pAttention->cacheV->data + offsetElements;
 
 	memcpy(kDst, pK->data, copyBytes);
 	memcpy(vDst, pV->data, copyBytes);
@@ -125,9 +128,9 @@ void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* 
 	lyTensorPrint(pInput);
 
 	lyTensor *xq, *xk, *xv;
-	lyTensorMatMul(&xq, pInput, pAttention->attnWQ);
-	lyTensorMatMul(&xk, pInput, pAttention->attnWK);
-	lyTensorMatMul(&xv, pInput, pAttention->attnWV);
+	lyTensorMatMul(&xq, pInput, pAttention->attnWQ, pAttention->openCLContext);
+	lyTensorMatMul(&xk, pInput, pAttention->attnWK, pAttention->openCLContext);
+	lyTensorMatMul(&xv, pInput, pAttention->attnWV, pAttention->openCLContext);
 	lyTensorPrint(xq);
 	lyTensorPrint(xk);
 	lyTensorPrint(xv);
@@ -172,10 +175,10 @@ void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* 
 	int32_t	  perm1[] = {1, 0, 2};
 	int32_t	  perm2[] = {0, 2, 1};
 
-	lyTensorTranspose(&transposedQ, rotatedQ, perm1);
-	lyTensorTranspose(&transposedK, repeatedKeys, perm1);
-	lyTensorTranspose(&reTransposedK, transposedK, perm2);
-	lyTensorTranspose(&transposedV, repeatedValues, perm1);
+	lyTensorTranspose(&transposedQ, rotatedQ, perm1, pAttention->openCLContext);
+	lyTensorTranspose(&transposedK, repeatedKeys, perm1, pAttention->openCLContext);
+	lyTensorTranspose(&reTransposedK, transposedK, perm2, pAttention->openCLContext);
+	lyTensorTranspose(&transposedV, repeatedValues, perm1, pAttention->openCLContext);
 	lyTensorDestroy(rotatedQ);
 	lyTensorDestroy(repeatedKeys);
 	lyTensorDestroy(repeatedValues);
@@ -185,31 +188,31 @@ void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* 
 	lyTensorPrint(transposedV);
 
 	lyTensor* scores;
-	lyTensorMatMul(&scores, transposedQ, reTransposedK);
+	lyTensorMatMul(&scores, transposedQ, reTransposedK, pAttention->openCLContext);
 	lyTensorPrint(transposedQ);
 	lyTensorPrint(reTransposedK);
 	lyTensorPrint(scores);
 
-	nv_bfloat16 scaleFactor = __float2bfloat16_rz((float)(1.0 / sqrt((double)pAttention->headDim)));
-	lyTensor*	scaledScores;
-	lyTensorScaleAndAdd(&scaledScores, scores, pMask, scaleFactor, __float2bfloat16_rz(1.f));
+	lyBfloat16 scaleFactor = lyFloat32ToBfloat16(1.0 / sqrt(pAttention->headDim));
+	lyTensor*  scaledScores;
+	lyTensorScaleAndAdd(&scaledScores, scores, pMask, scaleFactor, lyFloat32ToBfloat16(1.f), pAttention->openCLContext);
 	lyTensorDestroy(scores);
 	lyTensorPrint(scaledScores);
 
 	lyTensor* softmaxScores;
-	lyTensorSoftmax(&softmaxScores, scaledScores);
+	lyTensorSoftmax(&softmaxScores, scaledScores, pAttention->openCLContext);
 	lyTensorDestroy(scaledScores);
 	lyTensorPrint(softmaxScores);
 
 	lyTensor* attnOut;
-	lyTensorMatMul(&attnOut, softmaxScores, transposedV);
+	lyTensorMatMul(&attnOut, softmaxScores, transposedV, pAttention->openCLContext);
 	lyTensorDestroy(softmaxScores);
 	lyTensorDestroy(transposedV);
 	lyTensorPrint(attnOut);
 
 	lyTensor* reTransposed;
 	int32_t	  transposePerm[] = {1, 0, 2};
-	lyTensorTranspose(&reTransposed, attnOut, transposePerm);
+	lyTensorTranspose(&reTransposed, attnOut, transposePerm, pAttention->openCLContext);
 	lyTensorDestroy(attnOut);
 	lyTensorPrint(reTransposed);
 
@@ -217,7 +220,7 @@ void lyAttentionForward(lyTensor** ppOutput, lyAttention* pAttention, lyTensor* 
 	lyTensorReshape(reTransposed, flatShape, 2);
 	lyTensorPrint(reTransposed);
 
-	lyTensorMatMul(ppOutput, reTransposed, pAttention->attnWO);
+	lyTensorMatMul(ppOutput, reTransposed, pAttention->attnWO, pAttention->openCLContext);
 	lyTensorPrint(*ppOutput);
 
 	lyTensorDestroy(reTransposed);

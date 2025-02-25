@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lyModel.h"
+#include "lyOpenCL.h"
 #include "lyTensor.h"
 
 typedef struct lyFeedForward
@@ -10,8 +11,11 @@ typedef struct lyFeedForward
 	lyTensor* ffnGate;
 	lyTensor* ffnDown;
 	lyTensor* ffnUp;
+
+	lyOpenCLContext* openCLContext;
 } lyFeedForward;
 
-void lyFeedForwardCreate(lyFeedForward** ppFeedForward, const lyModel* pModel, int32_t layerIndex);
+void lyFeedForwardCreate(lyFeedForward** ppFeedForward, const lyModel* pModel, int32_t layerIndex, lyOpenCLContext* pContext);
+
 void lyFeedForwardDestroy(lyFeedForward* pFeedForward);
 void lyFeedForwardForward(lyTensor** ppOutput, const lyFeedForward* pFeedForward, lyTensor* pInput);

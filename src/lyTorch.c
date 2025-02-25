@@ -1,6 +1,7 @@
 #include "lyTorch.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void* lyTorchFindClass(const char* module, const char* name)
@@ -80,7 +81,7 @@ void lyTorchRebuildTensor(lyTensor** ppTensor, lyValue** args, size_t argCount)
 	lyTensorCreate(&pTensor, shape, (int32_t)shapeArray->count, NULL, NULL);
 	free(shape);
 
-	nv_bfloat16* srcData = (nv_bfloat16*)((uint8_t*)storage->rawData + storageOffset);
+	lyBfloat16* srcData = (lyBfloat16*)((uint8_t*)storage->rawData + storageOffset);
 	for (size_t i = 0; i < totalElements; i++)
 	{
 		pTensor->data[i] = srcData[i];

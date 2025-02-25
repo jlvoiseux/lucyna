@@ -4,6 +4,8 @@
 #include "lyTensor.h"
 #include "lyTransformerBlock.h"
 
+#include <lyOpenCL.h>
+
 typedef struct lyTransformer
 {
 	int32_t dim;
@@ -15,10 +17,11 @@ typedef struct lyTransformer
 	lyRMSNorm*			 norm;
 	lyTensor*			 output;
 
-	lyTensorDouble* freqsCis;
+	lyTensorDouble*	 freqsCis;
+	lyOpenCLContext* openCLContext;	 // Add this field
 } lyTransformer;
 
-void lyTransformerCreate(lyTransformer** ppTransformer, const lyModel* pModel);
+void lyTransformerCreate(lyTransformer** ppTransformer, const lyModel* pModel, lyOpenCLContext* pContext);
 void lyTransformerDestroy(lyTransformer* pTransformer);
 
 void lyTransformerForward(lyTensor** ppOutput, lyTransformer* pTransformer, const int32_t* pInputTokens, int32_t seqLen, int32_t startPos);

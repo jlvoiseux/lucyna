@@ -1,17 +1,21 @@
 #include "lyAttention.h"
+
 #include "lyModel.h"
 #include "lyModelLoader.h"
+#include "lyOpenCL.h"
 #include "lyRotaryPosEmbeddings.h"
 #include "lyTensorMath.h"
 #include "unity.h"
 
-static lyModel*		pModel	   = NULL;
-static lyAttention* pAttention = NULL;
+static lyModel*			pModel		   = NULL;
+static lyAttention*		pAttention	   = NULL;
+static lyOpenCLContext* pOpenCLContext = NULL;
 
 void setUp(void)
 {
+	lyOpenCLInit(&pOpenCLContext);
 	lyModelLoaderLoadModel(&pModel, "../model-tuned");
-	lyAttentionCreate(&pAttention, pModel, 0);
+	lyAttentionCreate(&pAttention, pModel, 0, pOpenCLContext);
 }
 
 void tearDown(void)
@@ -26,10 +30,21 @@ void tearDown(void)
 		lyModelLoaderDestroyModel(pModel);
 		pModel = NULL;
 	}
+	if (pOpenCLContext)
+	{
+		lyOpenCLDestroy(pOpenCLContext);
+		pOpenCLContext = NULL;
+	}
 }
 
 void test_AttentionForward(void)
 {
+	if (!pOpenCLContext || !pOpenCLContext->initialized)
+	{
+		TEST_IGNORE_MESSAGE("OpenCL context not initialized, skipping test");
+		return;
+	}
+
 	int32_t	  inputShape[] = {4, pModel->args.dim};
 	lyTensor* pInput;
 	lyTensorCreate(&pInput, inputShape, 2, NULL, NULL);
@@ -45,12 +60,12 @@ void test_AttentionForward(void)
 	}
 
 	lyTensorDouble* pFreqsCis;
-	lyRopePrecomputeFreqsCis(&pFreqsCis, pModel->args.dim, 4096, 10000.0f);
+	lyRopePrecomputeFreqsCis(&pFreqsCis, pModel->args.dim, 4096, 10000.0f, pOpenCLContext);
 
 	int32_t	  maskShape[] = {4, 4};
 	lyTensor* pMask;
 	lyTensorCreate(&pMask, maskShape, 2, NULL, NULL);
-	lyTensorMakeTriangularMask(pMask);
+	lyTensorMakeTriangularMask(pMask, pOpenCLContext);
 
 	lyTensor* pOutput;
 	lyAttentionForward(&pOutput, pAttention, pInput, 0, pFreqsCis, pMask);

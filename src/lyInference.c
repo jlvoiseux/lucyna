@@ -1,18 +1,20 @@
 #include "lyInference.h"
+
 #include "lyTensorMath.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-void lyInferenceCreate(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir)
+void lyInferenceCreate(lyInference** ppInference, lyModel* pModel, int32_t sequenceLength, bool (*logFn)(const char* format, ...), const char* modelDir, lyOpenCLContext* pOpenCLContext)
 {
 	lyInference* pInference = (lyInference*)malloc(sizeof(lyInference));
 
 	pInference->model		   = pModel;
 	pInference->sequenceLength = sequenceLength;
 	pInference->logFn		   = logFn;
+	pInference->openCLContext  = pOpenCLContext;
 
-	lyTransformerCreate(&pInference->transformer, pModel);
+	lyTransformerCreate(&pInference->transformer, pModel, pOpenCLContext);
 	lyTokenizerCreate(&pInference->tokenizer, "../model-tuned");
 
 	*ppInference = pInference;
@@ -46,7 +48,7 @@ void lyInferenceGenerateNextToken(lyGenerationStepResult* pResult, lyInference* 
 	lyTensorDestroy(logits);
 
 	int32_t nextToken;
-	lyTensorArgmax(&nextToken, lastLogits);
+	lyTensorArgmax(&nextToken, lastLogits, pInference->openCLContext);
 	lyTensorDestroy(lastLogits);
 
 	if (pTokens[curPos] != pInference->tokenizer->padId)

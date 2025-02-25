@@ -2,7 +2,6 @@
 
 #include "lyModel.h"
 
-#include <cuda_runtime.h>
 #include <stdint.h>
 
 void lyModelLoaderMapFile(const char* filename, lyMappedFile* pMapping);

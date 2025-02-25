@@ -1,17 +1,25 @@
+#include "lyTransformer.h"
+
 #include "lyModelLoader.h"
+#include "lyOpenCL.h"
 #include "lyRotaryPosEmbeddings.h"
 #include "lyTensor.h"
 #include "lyTensorMath.h"
-#include "lyTransformer.h"
 #include "lyUtil.h"
 #include "unity.h"
 
-#define M_PI 3.14159265358979323846f
+#include <stdlib.h>
 
-static lyModel* pModel = NULL;
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
+static lyModel*			pModel		   = NULL;
+static lyOpenCLContext* pOpenCLContext = NULL;
 
 void setUp(void)
 {
+	lyOpenCLInit(&pOpenCLContext);
 	lyModelLoaderLoadModel(&pModel, "../model-tuned");
 }
 
@@ -21,6 +29,11 @@ void tearDown(void)
 	{
 		lyModelLoaderDestroyModel(pModel);
 		pModel = NULL;
+	}
+	if (pOpenCLContext)
+	{
+		lyOpenCLDestroy(pOpenCLContext);
+		pOpenCLContext = NULL;
 	}
 }
 
@@ -41,19 +54,24 @@ void test_TransformerForward(void)
 		return;
 	}
 
+	if (!pOpenCLContext || !pOpenCLContext->initialized)
+	{
+		TEST_IGNORE_MESSAGE("OpenCL context not initialized, skipping test");
+		return;
+	}
+
 	const int32_t SEQ_LENGTH	 = 20;
 	const int32_t promptTokens[] = {128000, 128006, 882, 128007, 271, 3923, 374, 701, 836, 30, 128009, 128006, 78191, 128007, 271};
 	const int32_t promptLength	 = sizeof(promptTokens) / sizeof(promptTokens[0]);
 
 	lyTransformer* pTransformer;
-	lyTransformerCreate(&pTransformer, pModel);
+	lyTransformerCreate(&pTransformer, pModel, pOpenCLContext);
 
 	int32_t	  prevPos = 0;
 	lyTensor* pLogits;
 	lyTensor* pLastLogits;
 	int32_t*  generatedTokens = (int32_t*)malloc(SEQ_LENGTH * sizeof(int32_t));
 
-	// Copy prompt tokens
 	memcpy(generatedTokens, promptTokens, promptLength * sizeof(int32_t));
 
 	for (int32_t curPos = promptLength; curPos < SEQ_LENGTH; curPos++)
@@ -63,7 +81,7 @@ void test_TransformerForward(void)
 		lyTensorDestroy(pLogits);
 
 		int32_t nextToken;
-		lyTensorArgmax(&nextToken, pLastLogits);
+		lyTensorArgmax(&nextToken, pLastLogits, pOpenCLContext);
 		lyTensorDestroy(pLastLogits);
 
 		generatedTokens[curPos] = nextToken;
