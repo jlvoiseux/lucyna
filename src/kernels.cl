@@ -28,7 +28,7 @@ __kernel void scaleAndAddKernel(__global const ushort* A, __global const ushort*
     uint aVal_bits = ((uint)A[idx]) << 16;
     float aVal = as_float(aVal_bits) * alpha;
 
-    if (B != NULL) {
+    if (B != 0) {
         int bIdx = 0;
         int temp = idx;
 

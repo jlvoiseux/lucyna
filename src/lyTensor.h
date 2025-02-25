@@ -2,6 +2,7 @@
 
 #include <lyBfloat16.h>
 #include <stdint.h>
+#include <stddef.h>
 
 typedef struct lyTensor
 {

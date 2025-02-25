@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lyValue.h"
+#include <stddef.h>
 
 typedef struct lyDict
 {

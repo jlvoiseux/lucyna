@@ -4,6 +4,8 @@ project(lucyna C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+
 file(GLOB BASE_SOURCES "src/ly*.c")
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
@@ -22,7 +24,12 @@ FetchContent_MakeAvailable(pcre)
 include_directories(${pcre_BINARY_DIR})
 
 add_library(lucyna_lib STATIC ${BASE_SOURCES})
-target_link_libraries(lucyna_lib pcre2-8 ${OpenCL_LIBRARIES})
+
+if(UNIX)
+    target_link_libraries(lucyna_lib pcre2-8 ${OpenCL_LIBRARIES} m)
+else ()
+    target_link_libraries(lucyna_lib pcre2-8 ${OpenCL_LIBRARIES})
+endif ()
 target_compile_definitions(lucyna_lib PUBLIC CL_TARGET_OPENCL_VERSION=300)
 
 add_executable(lucyna "src/main.c")
