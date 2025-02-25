@@ -14,7 +14,7 @@ typedef struct lyTransformerBlock
 
 	lyAttention*   attention;
 	lyFeedForward* feedForward;
-} lyLlamaTransformerBlock;
+} lyTransformerBlock;
 
 void lyTransformerBlockCreate(lyTransformerBlock** ppBlock, const lyModel* pModel, int32_t layerIndex);
 void lyTransformerBlockDestroy(lyTransformerBlock* pBlock);
